@@ -3,9 +3,22 @@
 ## 📊 EXAM OVERVIEW
 - **Exam Code:** SCS-C03
 - **Duration:** 170 minutes
-- **Questions:** 65
+- **Questions:** 65 (roughly 30 are long 7–8 sentence scenario questions)
 - **Passing Score:** 750/1000
-- **Domain Distribution:** IAM (25%) | Infrastructure (26%) | Logging (20%) | Data Protection (22%) | Incident Response (7%)
+
+---
+
+## ⚡ REAL EXAM TIPS (From March 2026 Sitting)
+
+| Tip | Details |
+|-----|---------|
+| **Trust your first answer** | Do not change answers at review time — instinct is usually right |
+| **Select before flagging** | Always pick your best answer BEFORE flagging — never leave a question blank |
+| **Read every option** | Even if you recognize the concept, distractor options are intentionally close |
+| **30 of 65 are scenario questions** | Expect 7–8 sentence scenarios — do not skim, read every sentence |
+| **Pacing** | ~2.5 minutes per question — flag hard ones and return at end |
+| **ESL +30 min accommodation** | Non-native English speakers: claim free +30 minutes via aws.training → Request Exam Accommodations → ESL +30 MINUTES |
+| **Study schedule (last week)** | One practice exam + 3–5 topic quizzes per day in the final week |
 
 ---
 
@@ -362,7 +375,7 @@ Guardrails are applied at the API layer **before prompts reach the model** and *
 | AWS Directory Service | Managed AD (Microsoft AD or Simple AD); LDAP integration; trust relationships |
 | AWS Firewall Manager | Centrally manage WAF, SG, Shield, Network Firewall policies across Org accounts |
 | Automated Forensics Orchestrator for EC2 | Automated EC2 forensics workflow; memory/disk acquisition, isolation, snapshot |
-| Amazon GuardDuty | ML-based threat detection; ingests CloudTrail, DNS, VPC Flow Logs, S3, EKS |
+| Amazon GuardDuty | ML-based threat detection; ingests CloudTrail, DNS, VPC Flow Logs (core); S3 data events, EKS, RDS, Lambda, malware scan via optional protection plans (off by default) |
 | AWS IAM Identity Center | Central SSO for multi-account access; permission sets; SCIM provisioning |
 | AWS IAM | Policies, roles, users, groups, permission boundaries, STS, Access Analyzer |
 | Amazon Inspector | Automated vulnerability assessment for EC2, Lambda, ECR container images |
@@ -396,7 +409,48 @@ Guardrails are applied at the API layer **before prompts reach the model** and *
 
 ---
 
+# 🔍 EXAM INTERPRETATION LAYER
+
+> **Core rule:** Do NOT solve based on real-world design. Solve based on the AWS expected pattern. The keyword in the question drives the answer — not your architecture preference.
+
+## Keyword → Service Mapping
+
+| Keyword in question | Expected service |
+|--------------------|-----------------|
+| Aggregation / streaming (logs) | Kinesis Firehose or Kinesis Data Streams |
+| View / query logs | CloudWatch Logs Insights |
+| Central logging (multi-account) | CloudTrail Org Trail |
+| Real-time threat detection | GuardDuty |
+| Compliance / audit / drift | AWS Config |
+| Secrets at runtime / auto-rotation | Secrets Manager |
+| Bootstrap / startup config / non-secret params | SSM Parameter Store |
+| Private access to AWS services (no internet) | VPC Endpoint |
+| Security findings aggregation | Security Hub |
+| Long-term security data lake | Amazon Security Lake |
+| Encrypt data larger than 4 KB with KMS | `GenerateDataKey` (envelope encryption) |
+| Apply policy to all future accounts in Org | Attach SCP / policy to the OU (not individual accounts) |
+
+> **Tie-breaker:** When two answers look correct, pick the one whose service name matches a keyword in the question stem.
+
+---
+
 # 🚨 EXAM DECISION ENGINE (START HERE)
+
+## Step 0 — Identify Intent First
+
+Before classifying the domain, classify **what the question is asking you to do**:
+
+| Intent | Correct tool family |
+|--------|--------------------|
+| **Visibility** — see / query / monitor | CloudWatch, CloudTrail |
+| **Detection** — find threats / anomalies | GuardDuty, Inspector, Macie |
+| **Aggregation** — collect / route / stream | Kinesis, Security Lake, EventBridge |
+| **Enforcement** — restrict / prevent / govern | IAM, SCP, Config, Permission Boundary |
+| **Response** — fix / isolate / remediate | Lambda, SSM Automation, EventBridge |
+
+> If the question says "centralise" or "aggregate" → route to Kinesis/Security Lake, not CloudWatch.
+
+---
 
 ## Step 1 — Identify the Domain
 - **Identity/Access** → IAM + STS
@@ -419,7 +473,10 @@ Guardrails are applied at the API layer **before prompts reach the model** and *
 | Secrets storage | Secrets Manager | Auto-rotation |
 | Compliance checking | AWS Config | Continuous |
 | Network isolation | VPC + SG | Stateful firewall |
-| Log analysis | CloudWatch Logs Insights | Fast queries |
+| Log analysis / querying | CloudWatch Logs Insights | Fast queries — NOT aggregation |
+| Log aggregation / streaming | Kinesis Firehose | Real-time delivery to S3/OpenSearch |
+
+> ⚠️ **CloudWatch Logs Insights = querying only.** It does not aggregate logs from multiple accounts or stream data. Use Kinesis for aggregation pipelines.
 
 ---
 
@@ -516,7 +573,7 @@ Question asks about...
 
 ---
 
-# 🔐 IAM DEEP DIVE — THE FULL PICTURE (25% of Exam)
+# 🔐 IAM DEEP DIVE — THE FULL PICTURE
 
 ---
 
@@ -633,8 +690,8 @@ Applied at the **AWS Organization** level (to the Root, OUs, or individual accou
 **Rules:**
 - An SCP `Allow` does not grant access — it just removes a restriction.
 - An SCP `Deny` **always wins** regardless of IAM policies.
-- SCPs apply to every principal in the account **except the root user**.
-- The management/master account is **never affected** by SCPs applied to it.
+- SCPs apply to **every principal in member accounts, including the root user**.
+- The management account is **never affected** by SCPs — they do not apply to the management account at all.
 
 **Common SCP patterns:**
 
@@ -681,6 +738,18 @@ Root (SCP A)
         └── Account: prod-001 → Effective = A ∩ B ∩ account policies
 ```
 Effective permissions = intersection of all SCPs in the hierarchy.
+
+### SCP Exam Safety Rule
+
+> ⚠️ **Never choose an SCP that can unintentionally block all access.**
+
+| Dangerous SCP pattern | Why it's wrong on the exam |
+|-----------------------|---------------------------|
+| Broad `Deny *` with no exception clause | Locks all principals including break-glass roles |
+| Condition on dynamic values (AMI IDs, resource names) | Can drift and block legitimate operations |
+| No `aws:PrincipalArn` escape hatch | Emergency access becomes impossible |
+
+**AWS exam preference:** Targeted SCPs with scoped conditions (`aws:PrincipalArn`, `aws:RequestedRegion`) over broad blanket denies. When in doubt, the answer that preserves emergency access is correct.
 
 ---
 
@@ -999,7 +1068,136 @@ Corporate IdP (Azure AD/Okta)
 
 ---
 
-## 12. IAM Best Practices for Exam
+## 12. Amazon Verified Permissions — Fine-Grained App Authorization
+
+**What it is:** Managed authorization service that externalizes access control logic from application code using the **Cedar policy language**. Handles "can this user do this action on this resource?" decisions.
+
+### Core Concepts
+| Concept | Description |
+|---------|-------------|
+| **Policy Store** | Repository of Cedar policies and schema — the source of truth for authorization |
+| **Cedar** | Expressive, fine-grained policy language designed for correctness and auditability |
+| **IsAuthorized API** | Application calls this API with `principal`, `action`, `resource` → receives `ALLOW/DENY` |
+| **Schema** | Defines entity types, actions, and relationships — enables policy validation |
+| **Entities** | Real-world objects passed at authorization time (e.g., user attributes, resource tags) |
+
+### Cedar Policy Example
+```cedar
+// Allow managers to approve expense reports in their department  
+permit (
+  principal in Role::"Manager",
+  action == Action::"ApproveExpense",
+  resource
+) when {
+  principal.department == resource.department
+};
+```
+
+### Authorization Patterns
+| Pattern | Cedar Approach |
+|---------|---------------|
+| **RBAC** | Define roles (groups of principals), permit role → action |
+| **ABAC** | Use `.when` clauses with attributes: `principal.clearance >= resource.classification` |
+| **ReBAC** | Hierarchy-based: `principal in Group::"Admins"` or parent/child relationships |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Externalize fine-grained auth from app code | Amazon Verified Permissions + Cedar |
+| Application needs "can user X read document Y?" decision | Verified Permissions `IsAuthorized` API call |
+| Centralize authorization policies across microservices | Single Verified Permissions policy store |
+| Audit every authorization decision | CloudTrail logs all `IsAuthorized` API calls |
+
+---
+
+## 13. IAM Roles Anywhere — On-Premises Workload Access
+
+**What it is:** Enables on-premises servers, containers, and applications to obtain **temporary AWS credentials** using X.509 certificates — eliminating long-term IAM access keys for on-prem workloads.
+
+### How It Works
+```
+On-prem workload holds X.509 certificate (from your CA or AWS Private CA)
+  → Presents certificate to IAM Roles Anywhere
+      → Roles Anywhere validates against a Trust Anchor
+          → Returns temporary STS credentials (AK + SK + session token)
+              → Workload calls AWS APIs with temporary credentials
+```
+
+### Key Concepts
+| Concept | Description |
+|---------|-------------|
+| **Trust Anchor** | Reference to a CA (AWS Private CA or external CA). Certificates signed by this CA are trusted |
+| **Profile** | Defines which IAM roles can be assumed and the session duration (max 12h) |
+| **Certificate** | X.509 cert presented by the workload — must be signed by a trusted CA |
+| **Credential Helper** | AWS-provided tool (`aws_signing_helper`) that handles cert-based credential retrieval |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| On-prem servers need AWS access without long-term keys | IAM Roles Anywhere with X.509 certs |
+| Eliminate static access keys from physical data center | IAM Roles Anywhere + AWS Private CA |
+| On-prem CI/CD pipeline needs temporary AWS credentials | IAM Roles Anywhere (or OIDC for cloud CI) |
+| Certificate-based authentication to AWS APIs | IAM Roles Anywhere Trust Anchor |
+
+---
+
+## 14. AWS Directory Service
+
+**What it is:** Managed Microsoft Active Directory in the AWS Cloud. Three variants for different use cases.
+
+### Three Types Compared
+| Type | Description | Use Case |
+|------|-------------|----------|
+| **AWS Managed Microsoft AD** | Full Microsoft AD (2019) running on managed Windows DCs in AWS | Large orgs, trust with on-prem AD, MFA, RDS/WorkSpaces integration |
+| **AD Connector** | Proxy — redirects LDAP/Kerberos queries to your on-prem AD | Small orgs that want AD auth but keep directory on-prem; no directory replication |
+| **Simple AD** | Samba-based, limited AD-compatible service | Small orgs with basic needs, no trust relationships, no MFA |
+
+### Key Protocols and Ports
+| Protocol | Port | Use |
+|----------|------|-----|
+| LDAP | 389 (TCP/UDP) | Directory queries (cleartext) |
+| LDAPS | 636 (TCP) | Encrypted directory queries |
+| Kerberos | 88 (TCP/UDP) | Authentication tickets |
+| DNS | 53 (TCP/UDP) | Domain name resolution |
+| SMB/CIFS | 445 (TCP) | File shares |
+
+### Trust Relationships
+- **AWS Managed Microsoft AD** can establish **two-way forest trust** with on-prem AD.
+- Users in on-prem AD can then access AWS resources via federated IAM roles.
+- Requires Direct Connect or VPN for connectivity.
+- **AD Connector** does NOT replicate the directory — it proxies queries to on-prem.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Users log in AWS with on-prem AD credentials | AD Connector (proxy) or Managed AD (trust) |
+| Need MFA with AD for AWS WorkSpaces | AWS Managed Microsoft AD + MFA (RADIUS) |
+| Small org needs basic LDAP-compatible auth | Simple AD |
+| Keep all directory data on-premises | AD Connector — no data stored in AWS |
+| RDS SQL Server Windows Authentication | AWS Managed Microsoft AD |
+
+---
+
+## 15. IAM Policy Simulator
+
+**What it is:** Tool (console and API) that tests and validates IAM policies WITHOUT making real API calls. Simulates what an IAM user, role, or group can or cannot do.
+
+### What You Can Test
+- Evaluate policies for users, groups, or roles
+- Test the effect of SCPs, permission boundaries, and resource policies together
+- **Identify why an action is denied** — shows which policy is causing the deny
+- Simulate with custom context keys (conditions like `aws:RequestedRegion`, `aws:MultiFactorAuthPresent`)
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Test if a role can call `kms:Decrypt` before deploying | IAM Policy Simulator |
+| Diagnose why `s3:PutObject` returns AccessDenied | IAM Policy Simulator — shows exact deny source |
+| Validate SCPs before applying to account | IAM Policy Simulator with SCP context |
+
+---
+
+## 16. IAM Best Practices for Exam
 
 | Practice | Why |
 |----------|-----|
@@ -1016,7 +1214,7 @@ Corporate IdP (Azure AD/Okta)
 
 ---
 
-## 13. IAM Exam Traps — Critical Distinctions
+## 17. IAM Exam Traps — Critical Distinctions
 
 | Trap | Correct Understanding |
 |------|----------------------|
@@ -1026,14 +1224,14 @@ Corporate IdP (Azure AD/Okta)
 | **KMS key policy alone is enough** | ❌ KMS requires key policy AND IAM policy — one alone is insufficient |
 | **Permission boundary grants permissions** | ❌ It limits maximum — never grants on its own |
 | **IAM group is a principal** | ❌ Groups cannot be used as principals in resource or trust policies |
-| **Root user is affected by SCPs** | ❌ Root user is **exempt** from SCPs in all accounts |
-| **Management account is affected by SCPs** | ❌ SCPs attached to the management account do not restrict it |
+| **Root user is exempt from SCPs** | ❌ SCPs apply to **all principals in member accounts, including root**. Exception: the management account root is NOT affected by SCPs |
+| **Management account is affected by SCPs** | ❌ SCPs do not apply to the management account at all |
 | **Session token is optional** | ❌ Temporary credentials from STS **require all 3**: AK + SK + Session Token |
 | **AssumeRole duration is unlimited** | ❌ Maximum is 12 hours (set on the role); default is 1 hour |
 
 ---
 
-## 14. Policy Evaluation — Same-Account vs Cross-Account Flowchart
+## 18. Policy Evaluation — Same-Account vs Cross-Account Flowchart
 
 ```
 Same-Account Request:
@@ -1055,7 +1253,34 @@ Cross-Account Request (Account A principal → Account B resource):
 
 ---
 
-## 15. Common IAM Exam Scenarios
+## IAM Quick Decision Tree
+
+When the question involves access control, use this shortcut before reading answer options:
+
+```
+Is it cross-account?
+  YES → sts:AssumeRole (role in the target account)
+  NO  ↓
+
+Is it same-account, one resource?
+  YES → Resource-based policy may be enough (S3, KMS, Lambda)
+  NO  ↓
+
+Need to cap maximum permissions for a developer/role?
+  YES → Permission Boundary
+  NO  ↓
+
+Need org-wide or OU-wide restriction?
+  YES → SCP
+  NO  ↓
+
+Tag-based dynamic access?
+  YES → ABAC (aws:PrincipalTag / aws:ResourceTag)
+```
+
+---
+
+## 19. Common IAM Exam Scenarios
 
 | Scenario | Solution |
 |----------|----------|
@@ -1072,7 +1297,22 @@ Cross-Account Request (Account A principal → Account B resource):
 
 ---
 
-# 🌐 DOMAIN 3: INFRASTRUCTURE & NETWORK SECURITY (26%)
+## Least Operational Overhead — Decision Rule
+
+> **"Least operational overhead" does NOT always mean the simplest service.** It means the most AWS-native managed solution that requires the fewest ongoing manual actions.
+
+| Goal | Least-overhead answer |
+|------|----------------------|
+| View / alert on logs | CloudWatch Logs + Metric Filters + Alarms |
+| Process / route / aggregate logs | Kinesis Firehose (no servers to manage) |
+| Long-term storage + ad-hoc query | S3 + Athena (or CloudTrail Lake for API logs) |
+| Centralised multi-account security posture | Security Hub (delegated admin) |
+| Rotate secrets automatically | Secrets Manager (not Parameter Store — no built-in rotation) |
+| Scan new ECR images for vulnerabilities | Inspector v2 (continuous, no scheduled tasks) |
+
+---
+
+# 🌐 DOMAIN 3: INFRASTRUCTURE & NETWORK SECURITY
 
 ## Security Groups vs NACLs (Common Trap!)
 
@@ -1135,6 +1375,174 @@ Want to access S3 from EC2 without NAT/IGW?
 
 ---
 
+## EC2 Image Builder — Golden AMI Pipeline
+
+**What it is:** Automates the creation, testing, and distribution of secure, hardened EC2 AMIs (Amazon Machine Images).
+
+### Pipeline Components
+| Component | Description |
+|-----------|-------------|
+| **Recipe** | Base image + build components (software installs, patches, config) |
+| **Build Component** | YAML document — runs scripts to install and configure software |
+| **Test Component** | YAML document — runs validation tests (CIS benchmark checks, compliance scans) |
+| **Pipeline** | Orchestrates build → test → distribute on a schedule or trigger |
+| **Distribution Settings** | Share AMI to other accounts/regions or publish to Marketplace |
+
+### Golden AMI Security Strategy
+```
+Latest base AMI (Amazon Linux 2023 / Windows Server 2022)
+  → Apply OS patches (via SSM/dnf/yum)
+  → Install agents (CW agent, SSM agent, Inspector agent)
+  → Apply CIS hardening scripts
+  → Run automated compliance tests
+  → Distribute hardened AMI to all AWS accounts in Org
+  → Enforce via SCP: EC2 instances must use images from this AMI pipeline
+```
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Automate patch-hardened AMI builds | EC2 Image Builder pipeline |
+| Ensure all EC2 instances boot from approved images | Image Builder + SCP requiring specific AMI tags |
+| Automate CIS benchmark hardening before AMI distribution | Image Builder test components |
+
+---
+
+## AWS Systems Manager — Security Deep Dive
+
+### Session Manager
+**What it is:** Browser-based and CLI-based interactive shell access to EC2 and on-premises servers — **without opening port 22 or 3389**.
+
+| Feature | Details |
+|---------|---------|
+| **No inbound ports required** | SSM agent on instance → communicates outbound to SSM endpoint (HTTPS) |
+| **Session logging** | Full keystroke logging to CloudTrail, S3, or CloudWatch Logs |
+| **IAM-controlled** | Access governed by IAM policies (`ssm:StartSession`), not SSH keys |
+| **OS user restriction** | Can restrict which OS user the session runs as |
+| **PrivateLink support** | Use VPC endpoint for SSM so traffic never hits public internet |
+
+### EC2 Instance Connect (EIC)
+| Feature | Details |
+|---------|---------|
+| **Port 22 required** | Inbound SSH still required in Security Group (but only from EC2 Instance Connect IP range) |
+| **Short-lived keys** | EC2 Instance Connect pushes a one-time public SSH key valid for 60 seconds |
+| **Auth via IAM** | IAM controls who can push keys (`ec2-instance-connect:SendSSHPublicKey`) |
+| **No persistent keys** | No need to manage SSH key pairs in the OS |
+
+### Session Manager vs EC2 Instance Connect
+| Aspect | Session Manager | EC2 Instance Connect |
+|--------|----------------|---------------------|
+| **Open port required** | ❌ None | ✅ Port 22 inbound |
+| **SSH required** | ❌ No | ✅ Yes |
+| **Key management** | ❌ No keys | ✅ One-time ephemeral key |
+| **Full session logging** | ✅ CloudTrail + S3 + CW | ⚠️ Limited (IAM action only) |
+| **Network requirement** | HTTPS to SSM endpoint | SSH to instance IP |
+| **Best for** | Compliance, no-internet instances | Quick SSH when port 22 is acceptable |
+
+### Patch Manager
+**What it is:** Automates OS and application patching across EC2 and on-premises instances at scale.
+
+| Concept | Description |
+|---------|-------------|
+| **Patch Baseline** | Defines which patches to approve (auto-approve by severity, exclude by CVE) |
+| **Maintenance Window** | Scheduled time window for patch application (e.g., every Sunday 2 AM) |
+| **Patch Group** | Tag-based grouping of instances — assign different baselines per group (prod vs dev) |
+| **Pre-defined baselines** | AWS provides baselines for Amazon Linux, RHEL, Windows, Ubuntu |
+| **Custom baselines** | Create your own — approve specific CVEs, block specific patches |
+| **Inspector integration** | Inspector v2 findings feed into Patch Manager for vulnerability-driven remediation |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Patch all EC2 instances without SSH or RDP access | Session Manager + Patch Manager (no inbound ports) |
+| Apply different patch policies to prod vs dev EC2 | Patch Manager Patch Groups + separate baselines |
+| Schedule weekly patching with rollback on failure | Patch Manager with Maintenance Window |
+
+### State Manager
+**What it is:** Maintains desired configuration state on EC2 and on-premises instances using SSM Associations.
+
+- An **Association** defines: which document to run, on which instances (targets), on what schedule.
+- Continuously re-applies the configuration if it drifts — ensures consistent security posture.
+- Use cases: Ensure CW agent is always running, disable root SSH login, enforce host-based firewall rules.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Continuously enforce security configuration on EC2 | SSM State Manager Association |
+| Ensure SSM agent is always running on all instances | State Manager Association for SSM agent install |
+
+---
+
+## Network Access Analyzer
+
+**What it is:** Identifies unintended network access to AWS resources by analyzing VPC configurations — without generating actual traffic.
+
+### How It Works
+- Define a **Network Access Scope** (source: internet, specific CIDR; destination: EC2 instance, RDS) .
+- Network Access Analyzer analyzes security groups, route tables, NACLs, VPC endpoints, and peering connections.
+- Returns **findings** where a path exists that you didn't intend.
+- Use case: Verify that database instances are NOT reachable from the internet; verify no publicly-routed path to private instances.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Verify no unintended internet access to private RDS instances | Network Access Analyzer |
+| Analyze VPC network paths without generating traffic | Network Access Analyzer |
+| Part of compliance check: no database is internet-accessible | Network Access Analyzer scope for 0.0.0.0/0 → RDS |
+
+---
+
+## AWS Direct Connect — MACsec Encryption
+
+**What it is:** Layer 2 encryption for Direct Connect (DC) connections between your on-premises router and the AWS Direct Connect location.
+
+### Key Facts
+- **MACsec** (Media Access Control Security) encrypts traffic at Layer 2 — below TCP/IP.
+- Available on **dedicated connections** (1 Gbps, 10 Gbps, 100 Gbps) — not hosted connections.
+- Encryption occurs between the customer router and the Direct Connect endpoint — **before entering AWS**.
+- Does NOT replace application-level TLS — provides layer 2 encryption for the physical connection.
+- Configured via the Direct Connect console: enable MACsec, exchange CKN/CAK key pairs.
+
+| Attribute | Value |
+|-----------|-------|
+| Layer | Layer 2 (Ethernet frames) |
+| Algorithm | AES-256-GCM |
+| Available on | Dedicated connections only |
+| Key management | Customer provides CKN/CAK pair |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Encrypt Direct Connect link at Layer 2 | Enable MACsec on dedicated connection |
+| Direct Connect is not encrypted by default | True — use MACsec for L2 or Site-to-Site VPN over DC for L3 encryption |
+| Highest-throughput encrypted on-prem to AWS link | 100 Gbps DC + MACsec |
+
+---
+
+## GenAI OWASP Top 10 for LLM Applications
+
+> **Exam note:** SCS-C03 added generative AI security. Focus on attack categories and AWS mitigations.
+
+| Rank | Vulnerability | Description | AWS Mitigation |
+|------|--------------|-------------|----------------|
+| **LLM01** | Prompt Injection | Malicious prompt overrides LLM instructions | Bedrock Guardrails (topic filters, denied topics) |
+| **LLM02** | Insecure Output Handling | LLM output executed as code/HTML without validation | Output validation in app logic; Bedrock Guardrails |
+| **LLM03** | Training Data Poisoning | Corrupt training data compromises model behavior | Data validation pipelines; SageMaker data quality |
+| **LLM04** | Model Denial of Service | Overload model with expensive requests | Throttling; Bedrock model invocation limits; WAF rate limiting |
+| **LLM05** | Supply Chain Vulnerabilities | Compromised third-party model or plugin | Use only verified models; ECR scanning for containers |
+| **LLM06** | Sensitive Information Disclosure | Model leaks training data or confidential context | Bedrock Guardrails PII detection; data protection policies |
+| **LLM07** | Insecure Plugin Design | Plugin gives LLM excessive permissions | IAM least privilege for Bedrock Agents actions |
+| **LLM08** | Excessive Agency | LLM takes unintended actions via tools | Bedrock Agents with human-in-the-loop approval |
+| **LLM09** | Overreliance | Users over-trust LLM outputs without validation | App design; not an AWS service mitigation |
+| **LLM10** | Model Theft | Attacker extracts model weights or logic | IAM policies restricting `bedrock:InvokeModel`; VPC endpoints |
+
+### Key AWS GenAI Security Services
+- **Amazon Bedrock Guardrails** — topic filters, denied topics, PII detection/redaction, word filters, grounding checks.
+- **Amazon Bedrock Agents** — define allowed tool actions with IAM roles; human approval for sensitive steps.
+- **VPC Interface Endpoints** — keep all Bedrock API calls off the public internet.
+
+---
+
 ## Container Security
 
 | Service | Key Feature |
@@ -1145,9 +1553,90 @@ Want to access S3 from EC2 without NAT/IGW?
 
 ---
 
+## AWS Network Firewall — Deep Dive
+
+**What it is:** Managed stateful/stateless deep-packet inspection (DPI) firewall deployed **inside your VPC**. Goes beyond Security Groups and NACLs — provides IDS/IPS, FQDN-based egress filtering, and Suricata-compatible signature rules.
+
+### Architecture
+```
+Internet → IGW
+  → Firewall Subnet (Network Firewall endpoint, one per AZ)
+    → Private Subnet (EC2 / ALB / RDS)
+
+Or centralized via Transit Gateway (hub-and-spoke):
+  Spoke VPCs → TGW → Inspection VPC (Network Firewall) → Internet
+```
+- Deploy **one firewall endpoint per AZ** in a dedicated firewall subnet.
+- Modify VPC route tables so traffic passes through the firewall endpoint before reaching its destination.
+
+### Rule Group Types
+
+| Rule Type | Layer | What It Matches | Use Case |
+|-----------|-------|-----------------|----------|
+| **Stateless** | L3/L4 | 5-tuple: src/dst IP, src/dst port, protocol | Bulk allow/deny by CIDR or port |
+| **Stateful (standard)** | L3–L7 | Connection state, application layer | Block SSH outbound; allow HTTPS only |
+| **Stateful (Suricata IDS/IPS)** | L7 | Payload signatures (Suricata rule format) | Detect malware C2 traffic, exploit patterns |
+| **Stateful (domain list)** | L7 (DNS/TLS SNI) | Fully-qualified domain names | Egress allowlist (only `.amazonaws.com`); block DGA domains |
+
+### Network Firewall vs WAF vs SG vs NACL
+
+| Control | Layer | Scope | Protocols | Use When |
+|---------|-------|-------|-----------|----------|
+| Security Group | L3–L4 stateful | Per ENI | All | Per-instance allow rules |
+| NACL | L3–L4 stateless | Per subnet | All | Subnet-level explicit deny |
+| WAF | L7 | CloudFront / ALB / API GW | HTTP/HTTPS only | Block SQLi, XSS, rate-limit HTTP |
+| Network Firewall | L3–L7 stateful+stateless | VPC perimeter | All protocols | IDS/IPS, FQDN filtering, non-HTTP protocol control |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Block all egress except approved domain list | Network Firewall stateful domain-list rule group |
+| Detect malware signatures in network payloads | Network Firewall with Suricata rules |
+| Centralized inspection for traffic between 20 VPCs | Network Firewall in inspection VPC behind Transit Gateway |
+| Block FTP or SMB outbound (non-HTTP protocols) | Network Firewall stateful rules (WAF cannot do this) |
+| WAF is deployed — why is non-HTTP port 22 traffic getting through? | WAF only inspects HTTP/HTTPS; add Network Firewall for all other protocols |
+
 ---
 
-# 🔐 DOMAIN 4: ENCRYPTION & DATA PROTECTION (22%)
+## AWS Firewall Manager — Deep Dive
+
+**What it is:** Single pane of glass to **centrally deploy and enforce** security policies across all accounts in an AWS Organization. Takes away the ability of individual accounts to deviate from the baseline.
+
+### Prerequisites
+1. **AWS Organizations** enabled.
+2. **AWS Config** enabled in every member account and region in scope.
+3. Designate a **Firewall Manager administrator account** (typically a security tooling account).
+
+### Policy Types
+
+| Policy Type | What It Deploys/Enforces | Auto-Remediation |
+|-------------|--------------------------|-----------------|
+| **WAF** | Same WebACL to all ALBs / CloudFront / API GW | Auto-associates; removes non-compliant associations |
+| **Security Group** | Enforce required SG rules; audit for overly permissive rules (0.0.0.0/0) | Add required rules; remove violating rules |
+| **Network Firewall** | Deploy Network Firewall + routing to all in-scope VPCs | Creates firewall endpoints and route table entries |
+| **Shield Advanced** | Subscribe all accounts; enable proactive engagement | Auto-subscribes new accounts joined to Org |
+| **DNS Firewall** | Deploy Route 53 Resolver DNS Firewall rule groups to VPCs | Auto-associates rule groups |
+
+### Key Distinctions
+
+| Question | Right Answer |
+|----------|--------------|
+| Ensure all ALBs across 50 accounts have the same WAF | Firewall Manager WAF policy |
+| Report which accounts have non-compliant SGs | Firewall Manager Security Group audit policy (reports and can auto-remediate) |
+| Prevent developers from detaching WAF from their ALB | Firewall Manager — member accounts cannot modify a Firewall Manager-managed WebACL |
+| New account added to Org — WAF must apply automatically | Firewall Manager with `Include all accounts under Organization` scope |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Centrally enforce WAF rules across entire organisation | Firewall Manager WAF policy (delegated admin) |
+| Auto-subscribe all new accounts to Shield Advanced | Firewall Manager Shield Advanced policy |
+| Detect EC2 instances with port 22 open to 0.0.0.0/0 across all accounts | Firewall Manager Security Group audit policy |
+| Deploy identical Network Firewall config to every VPC in the Org | Firewall Manager Network Firewall policy |
+
+---
+
+# 🔐 DOMAIN 4: ENCRYPTION & DATA PROTECTION
 
 ---
 
@@ -1238,7 +1727,7 @@ Exception: If key policy contains:
 |--------------|-----|--------|
 | **Automatic** (CMK) | Enabled on CMK — new key material every year | Old versions retained; existing ciphertext auto-decryptable |
 | **Manual** | Create new CMK, re-encrypt data, update all references | Full key replacement |
-| **AWS Managed** | Auto every 3 years | Cannot disable |
+| **AWS Managed** | Auto every year (365 days) | Cannot disable |
 
 **Exam trap:** Rotating a CMK does NOT invalidate existing ciphertext. The old backing key is retained for decryption. To remove access to all data encrypted with a key → schedule key deletion.
 
@@ -1247,6 +1736,35 @@ Exception: If key policy contains:
 - Same key ID, same key material — encrypted in one region can be decrypted in another.
 - Use case: Global applications, cross-region disaster recovery, global client-side encryption.
 - **Not the same as CRR** — key material is replicated, not the ciphertext.
+
+### KMS Imported Key Material (BYOK)
+- Bring your own key material generated outside AWS (HSM, custom crypto tool).
+- You generate a key pair in KMS → KMS returns a public key + import token → You encrypt your key material with the public key → Upload ciphertext.
+- **Key differences from standard CMK:**
+
+| Attribute | Standard CMK | Imported Key Material |
+|-----------|-------------|----------------------|
+| **Auto-rotation** | Supported | ❌ NOT supported — must rotate manually by re-importing |
+| **Key deletion** | 7–30 day waiting period | Can delete immediately by deleting the key material (makes key unusable instantly) |
+| **Re-import** | N/A | Yes — re-import the same or different material into same key ID |
+| **Key origin** | `AWS_KMS` | `EXTERNAL` |
+
+- **Exam trap:** Questions about immediate, cryptographic erasure of data → delete imported key material → data instantly unreadable.
+- **Exam trap:** Imported keys **cannot use automatic key rotation**.
+
+### KMS External Key Store (XKS)
+- Keys are stored and managed in your **own HSM or external key manager** — outside AWS.
+- KMS operations are **proxied** to your external key manager via an **XKS proxy** you deploy.
+- Key material **never enters AWS** — AWS only stores a reference to the external key.
+- Use case: Highly regulated industries where keys must remain in customer-controlled hardware.
+- **Latency tradeoff:** Every encrypt/decrypt call traverses the XKS proxy — higher latency than standard KMS.
+- **Availability dependency:** If your XKS proxy is unreachable, encryption/decryption fails.
+
+| Attribute | Standard KMS CMK | XKS Key |
+|-----------|-----------------|---------|
+| **Key material location** | AWS KMS HSMs | Your HSM / external key manager |
+| **Revocation** | Disable/delete key | Remove proxy access immediately |
+| **Compliance use case** | General | Keys outside AWS mandate |
 
 ### Key Deletion
 - **Minimum waiting period: 7 days** (default 30 days).
@@ -1554,6 +2072,7 @@ Rotation trigger (schedule or manual)
 - Use cases: mTLS between microservices, internal APIs, IoT device certificates.
 - **Exportable private keys** — unlike public ACM certificates.
 - Supports **short-lived certificates** (hours) for Zero-Trust environments.
+- **short-lived cert use case:** Issue certs valid for hours/days to on-premises workloads via IAM Roles Anywhere — removes need to revoke; certs expire automatically.
 - **Subordinate CA:** Create a hierarchy — Root CA (offline/HSM) → Subordinate CA (AWS Private CA) → end-entity certs.
 
 ### Exam Key Points
@@ -1563,17 +2082,188 @@ Rotation trigger (schedule or manual)
 | mTLS between internal microservices | ACM Private CA |
 | Certificate with exportable private key | ACM Private CA |
 | Auto-renewing wildcard cert for CloudFront | ACM (DNS validation) |
+| Short-lived certs for Zero-Trust on-prem access | ACM Private CA + IAM Roles Anywhere |
+
+---
+
+## CloudWatch Logs — Data Protection Policy
+
+**What it is:** Detect and mask sensitive data patterns in CloudWatch log groups automatically — without application code changes.
+
+### How It Works
+- Enable a **Data Protection Policy** on a log group.
+- Policy defines which data identifiers to detect (PII patterns: SSN, credit card, email, phone, passport, etc.).
+- **Audit action:** Log masked data findings to S3 or Kinesis Firehose for compliance review.
+- **Masking action:** Detected sensitive data is replaced with `[REDACTED]` in all reads by users without special permission.
+- Only users with `logs:Unmask` IAM permission can see original data.
+
+### Managed Data Identifiers
+AWS provides 100+ built-in patterns: SSN, credit card numbers (Visa/MC/Amex), IBAN, passport numbers, drug enforcement, National ID numbers for multiple countries, email addresses, IP addresses, etc.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent developers from seeing PII in application logs | CloudWatch Logs Data Protection Policy |
+| Automatically redact credit card numbers in logs | CW Logs Data Protection Policy with financial identifiers |
+| Audit what sensitive data is present in log groups | CW Logs Data Protection Policy → audit to S3 |
+
+---
+
+## SNS — Message Data Protection
+
+**What it is:** Detect, audit, redact, or block sensitive data in SNS messages before delivery.
+
+### Three Actions
+| Action | Effect |
+|--------|--------|
+| **Audit** | Log message with sensitive data detected (to CloudWatch Logs or Kinesis) |
+| **De-identify (mask)** | Replace sensitive data with `[REDACTED]` before delivering to subscriber |
+| **Block** | Reject the Publish API call entirely — message never delivered |
+
+- Uses the same 100+ AWS managed data identifiers as CloudWatch Logs Data Protection.
+- Policy is attached to the SNS topic.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent PII from flowing through an event-driven messaging pipeline | SNS message data protection policy |
+| Block messages containing SSNs before delivery | SNS data protection — Block action |
+
+---
+
+## AWS Signer — Digital Code Signing
+
+**What it is:** Managed code signing service that digitally signs code artifacts to verify publisher identity and detect tampering.
+
+### Supported Signing Targets
+| Target | Use |
+|--------|-----|
+| **AWS Lambda** | Sign deployment packages; verify code hasn't been tampered between deploy and execution |
+| **IoT Devices** | Sign OTA firmware updates; IoT Greengrass verifies signature before executing |
+| **Container Images** | Sign container images (notation-based signing) |
+
+### How It Works
+1. Create a signing profile in AWS Signer (selects signing algorithm and validity period).
+2. Submit an artifact to sign → Signer generates a digital signature.
+3. AWS Lambda validates signature at deployment using a Code Signing Config.
+4. Lambda rejects unsigned or signature-mismatch deployments.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Ensure Lambda functions were not tampered before execution | AWS Signer + Lambda Code Signing Config |
+| Verify firmware authenticity before deploying to IoT edge devices | AWS Signer + IoT Greengrass |
+| Cryptographically verify who built and published a Lambda package | AWS Signer digital signature |
+
+---
+
+## Nitro System — Inter-Instance Encryption
+
+**What it is:** Automatic hardware-level encryption of all traffic between EC2 Nitro instances within a VPC.
+
+- Applies to: **C5n, C6gn, C6i, P4d, R6i**, and other Nitro-based instance types when communicating on supported enhanced networking.
+- Encryption happens transparently at the hardware layer — **no application changes needed**.
+- Uses AES-256-GCM with keys managed by Nitro hardware — customer has no key management overhead.
+- **VPC stays fully encrypted even without VPN or TLS at the application layer**.
+- EMR cluster inter-node encryption and EKS node-to-node traffic also benefit from this on Nitro instances.
+
+| Attribute | Value |
+|-----------|-------|
+| Encryption algorithm | AES-256-GCM |
+| Key management | AWS Nitro hardware (automatic) |
+| Configuration needed | None — automatic on supported types |
+| Performance impact | None — offloaded to Nitro hardware |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Encrypt all EC2 traffic within VPC without app changes | Use Nitro-based instance types — automatic hardware encryption |
+| EMR compliance requires in-transit encryption between nodes | Enable Nitro-based instances + at-rest KMS encryption |
+
+---
+
+## AWS Client VPN — Remote Access Authentication
+
+**What it is:** Managed OpenVPN service allowing remote users to securely access AWS and on-premises resources.
+
+### Authentication Options
+| Method | How It Works |
+|--------|-------------|
+| **Active Directory (Managed AD / AD Connector)** | Users authenticate with corporate AD credentials |
+| **SAML 2.0 federated (IdP)** | Uses external IdP (Okta, Azure AD) via SAML — supports MFA at IdP layer |
+| **Mutual TLS (certificate-based)** | Client presents X.509 certificate; ACM Private CA issues client certs |
+| **Dual authentication** | Combine AD/SAML + mutual TLS for two-factor |
+
+### Authorization
+- **Authorization rules** define which CIDR ranges (AWS subnets, on-prem networks) each AD group or role can reach.
+- Supports **connection logging** to CloudWatch Logs — logs each connection attempt, source IP, user ID.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Remote employees need VPN access using corporate SSO (Okta) | Client VPN with SAML 2.0 federation |
+| Remote access with certificate-based auth (no password) | Client VPN with mutual TLS + ACM Private CA |
+| Enforce MFA for remote VPN access | Client VPN with SAML IdP that enforces MFA |
+
+---
+
+## Elastic Load Balancing (ELB) — Security Policies (TLS Enforcement)
+
+**What it is:** ELB security policies define which TLS versions and cipher suites the load balancer will accept from clients.
+
+### Key Policies
+| Policy | TLS Versions Allowed | Use Case |
+|--------|---------------------|----------|
+| **ELBSecurityPolicy-TLS13-1-3-2021** | TLS 1.3 only | Maximum security, newest clients |
+| **ELBSecurityPolicy-TLS13-1-2-2021** | TLS 1.2 + 1.3 | Recommended — broad compatibility + security |
+| **ELBSecurityPolicy-2016-08** | TLS 1.0–1.3 | Legacy — avoid for new deployments |
+| **ELBSecurityPolicy-FS** | TLS 1.2 + forward secrecy cipher suites | PCI compliance; ECDHE for perfect forward secrecy |
+
+- Apply security policies to **HTTPS and TLS listeners** on ALB/NLB.
+- Policy selection must balance security requirements vs. client compatibility.
+- **Forward secrecy (FS) policies** use ECDHE cipher suites — even if server private key is compromised later, past sessions cannot be decrypted.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Enforce TLS 1.2 minimum on public ALB | ELBSecurityPolicy-TLS13-1-2-2021 |
+| PCI DSS requires forward secrecy | ELBSecurityPolicy-FS policy |
+| Prevent TLS 1.0/1.1 connections | Apply modern security policy to ALB HTTPS listener |
+
+---
+
+## AWS DataSync — Secure Data Transfer
+
+**What it is:** Managed data transfer service for moving data between on-premises storage (NFS/SMB), cloud storage (S3, EFS, FSx), and AWS.
+
+### Security Features
+| Feature | Details |
+|---------|---------|
+| **In-transit encryption** | TLS 1.2 for all data transferred over public internet |
+| **At-rest encryption** | Honors destination service encryption (S3 SSE-KMS, EFS KMS) |
+| **Integrity checks** | SHA-256 checksums verified end-to-end — detects data corruption |
+| **Task filters** | Exclude specific file patterns to prevent sensitive data transfer |
+| **Bandwidth throttling** | Limits max throughput to avoid impacting production workloads |
+| **IAM execution role** | DataSync assumes an IAM role to write to S3/EFS/FSx |
+| **VPC deployment** | Agent can use VPC endpoints — traffic never traverses public internet |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Securely migrate NFS share to EFS with integrity verification | DataSync with TLS + checksums |
+| Limit DataSync from consuming all bandwidth | DataSync bandwidth throttling |
 
 ---
 
 ## EXAM TIPS & QUICK REFERENCE
 
-### High-Priority Services (by test weight)
-1. **IAM** - 25% of exam
-2. **KMS & Encryption** - 20% of exam
-3. **Logging & Monitoring** - 20% of exam
-4. **Infrastructure Protection** - 26% of exam
-5. **Incident Response** - 7% of exam
+### High-Priority Services
+1. **IAM** — Policy evaluation, cross-account, federation, Verified Permissions
+2. **KMS & Encryption** — CMKs, envelope encryption, key policies, imported keys
+3. **Logging & Monitoring** — CloudTrail, GuardDuty protection plans, Config, Security Hub
+4. **Infrastructure Protection** — SG/NACL, WAF, VPC Endpoints, Network Firewall
+5. **Incident Response** — Playbooks, forensics, automated remediation, OpsCenter
+6. **Governance** — SCPs, RCPs, Declarative Policies, Control Tower proactive controls
 
 ### Common Exam Scenarios
 - **Overly permissive policies** → Use Access Analyzer
@@ -1598,14 +2288,16 @@ Rotation trigger (schedule or manual)
 
 ### Policy Priority (AWS evaluation logic)
 ```
-1. Explicit Deny (game over)
-2. Organization SCP (permission boundary)
-3. Session Policy (permission boundary)
-4. Identity Policy (allow permission)
-5. Resource Policy (allow permission)
-6. IAM Permissions Boundary (limit)
-= Final decision on allow/deny
+1. Explicit Deny (anywhere) → always DENY
+2. Organization SCP → caps account-level permissions
+3. IAM Permissions Boundary → caps identity-level permissions
+4. Session Policy → further restricts assumed-role sessions
+5. Identity-Based Policy → grants actions to the principal
+6. Resource-Based Policy → grants/denies cross-account access
+= Final decision: must be allowed at every applicable layer
 ```
+> ⚠️ Permission Boundary comes BEFORE Identity Policy in evaluation — it limits what identity policies can grant, not the other way around.
+> ⚠️ Resource-Based Policy context matters: for **same-account** access, a resource policy Allow alone is sufficient (step 3, not step 6). Step 6 reflects **cross-account** access, where BOTH the resource policy (in Account B) AND an identity policy (in Account A) must allow the action.
 
 ### Encryption Decision Tree
 ```
@@ -1629,7 +2321,7 @@ Last Updated: March 2026
 
 | Service | Encryption at Rest | At Transit | Logging | Multi-Region | Cost |
 |---------|-------------------|------------|---------|--------------|------|
-| S3 | SSE-S3/KMS/C2 | HTTPS | CloudTrail | CRR | Per GB |
+| S3 | SSE-S3/KMS/SSE-C | HTTPS | CloudTrail | CRR | Per GB |
 | RDS | KMS | SSL/TLS | CloudWatch | Read Replicas | Per hour |
 | DynamoDB | KMS/SSE-S3 | HTTPS | CloudWatch | Global Tables | Per request |
 | EBS | KMS | N/A | CloudWatch | Snapshots | Per GB |
@@ -1706,104 +2398,140 @@ arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
 
 ---
 
-## COMPLIANCE & REGULATORY FRAMEWORKS
+## COMPLIANCE & REGULATORY FRAMEWORKS — AWS Control Mapping
 
-### Compliance Standards Covered by AWS
+> Exam questions appear as: "Company must meet [regulation] — which AWS controls satisfy requirement X?" Focus on which AWS service implements each requirement, not the framework definition itself.
 
-#### HIPAA (Health Insurance Portability & Accountability Act)
-- **Applies to:** Healthcare organizations, health plans
-- **Requirements:** Encryption at rest/transit, audit logs, access controls
-- **AWS Services:** HIPAA-eligible include RDS, S3, EBS, KMS, CloudTrail
-- **BAA Required:** Business Associate Agreement with AWS
+### HIPAA — Key AWS Controls
 
-#### PCI DSS (Payment Card Industry Data Security Standard)
-- **Applies to:** Organizations handling credit card data
-- **Levels:** 1-4 based on transaction volume
-- **Requirements:** Network segmentation, encryption, access logging
-- **AWS Services:** All AWS services can be PCI-compliant with proper configuration
+| HIPAA Requirement | AWS Service & Implementation |
+|-------------------|------------------------------|
+| Encrypt PHI at rest | SSE-KMS with CMK on S3/RDS/EBS; KMS key policy restricts access |
+| Encrypt PHI in transit | TLS enforced via ELB security policy; S3 bucket policy `aws:SecureTransport: false → Deny` |
+| Audit access to PHI | CloudTrail Data Events on S3; CloudWatch Logs with metric filters |
+| Access controls for PHI systems | IAM roles + least privilege; MFA enforced via IAM conditions |
+| Agreement with cloud provider | Sign AWS Business Associate Agreement (BAA) via AWS Artifact |
+| Breach detection | GuardDuty (threat detection) + Macie (sensitive data discovery in S3) |
 
-#### GDPR (General Data Protection Regulation)
-- **Applies to:** EU resident data processing
-- **Key Rights:** Right to be forgotten, data portability, consent
-- **Data Processing:** DPA (Data Processing Addendum) with AWS
-- **Data Residency:** EU regions (eu-west-1, eu-central-1, etc.)
-- **AWS Services:** All available in EU regions
+### PCI DSS — Key AWS Controls
 
-#### SOC 2 (Service Organization Control)
-- **Type I:** Design of controls (at point in time)
-- **Type II:** Effectiveness of controls (over time period)
-- **Trust Services Criteria:** Security, availability, processing integrity, confidentiality, privacy
+| PCI DSS Requirement | AWS Service & Implementation |
+|---------------------|------------------------------|
+| Req 1: Network segmentation of CDE | VPC private subnets + SGs + NACLs; VPC endpoints (no internet) |
+| Req 3: Encrypt cardholder data at rest | SSE-KMS or client-side encryption with CMK |
+| Req 7: Restrict access to cardholder data | IAM least privilege; `aws:PrincipalOrgID` on bucket policies |
+| Req 10: Log and monitor all access | CloudTrail + VPC Flow Logs + Config continuous recording |
+| Req 11: Vulnerability scanning | Amazon Inspector (automated CVE scanning) |
+| Req 11: Pen testing | Customer responsibility; submit to AWS before testing |
+| Enforce TLS + forward secrecy | ELB with `ELBSecurityPolicy-FS` (ECDHE ciphers, TLS 1.2+) |
+| Compliance evidence collection | AWS Audit Manager (PCI DSS framework) |
 
-#### FedRAMP (Federal Risk and Authorization Management Program)
-- **Applies to:** Federal government cloud usage
-- **Levels:** Low, Moderate, High
-- **AWS Services:** EC2, S3, RDS in GovCloud regions
+### GDPR — Key AWS Controls
 
-### Compliance Best Practices
-1. **CloudTrail Logging** - Audit API calls
-2. **Config Rules** - Continuous compliance checking
-3. **Encryption Keys** - Customer-managed CMK for sensitive data
-4. **Network Isolation** - VPCs, subnets, security groups
-5. **Access Controls** - IAM roles, least privilege
-6. **Data Retention** - S3 Object Lock, lifecycle policies
-7. **Monitoring** - CloudWatch, GuardDuty, Security Hub
+| GDPR Requirement | AWS Service & Implementation |
+|------------------|------------------------------|
+| Data residency (EU only) | SCP `Deny *` with `StringNotEquals aws:RequestedRegion` allowing only EU regions |
+| Right to erasure | S3 object deletion + KMS CMK key deletion (cryptographic erasure — instant) |
+| PII discovery and classification | Amazon Macie |
+| DLP (prevent PII leaking through logs/messages) | CW Logs Data Protection Policy; SNS message data protection |
+| Data processing audit trail | CloudTrail + AWS Audit Manager (GDPR framework) |
+| Breach notification (72 hours) | GuardDuty finding → EventBridge → SNS → Security team |
+
+### FedRAMP — Key AWS Controls
+
+| FedRAMP Requirement | AWS Service & Implementation |
+|---------------------|------------------------------|
+| FIPS 140-2 Level 3 encryption | CloudHSM (Level 3); KMS (Level 2 only) |
+| US-only data residency | AWS GovCloud regions (us-gov-west-1, us-gov-east-1) |
+| Continuous monitoring | AWS Config + Security Hub (NIST SP 800-53 standard) |
+| Privileged access management | IAM + MFA + CloudTrail + Session Manager (no SSH) |
+
+### Compliance Service Quick-Reference
+
+| Need | Correct AWS Service |
+|------|---------------------|
+| Collect evidence for auditors automatically | AWS Audit Manager |
+| Download AWS compliance reports (SOC 2, ISO, PCI) | AWS Artifact |
+| Continuous compliance checking with rules | AWS Config + Conformance Packs |
+| Aggregate compliance status across 50 accounts | Security Hub (CIS/PCI/FSBP/NIST standards) |
+| Immutable audit log that cannot be deleted | CloudTrail + S3 Object Lock (Compliance mode) |
+| Verify what sensitive data exists in S3 | Amazon Macie |
 
 ---
 
-## SCENARIO-BASED DECISION MAKING
+## ADVANCED EXAM TRAPS — MULTI-SERVICE SCENARIOS
 
-### Scenario 1: Securing API Keys & Credentials
-**Problem:** Database passwords and API keys scattered across code
-**Solution Path:**
-- ✅ Use **Secrets Manager** for automatic rotation
-- ✅ Use **Parameter Store** for non-rotating secrets
-- ✅ Enable **KMS encryption** for both
-- ✅ Rotate keys every 30-90 days
-- ✅ Use **IAM roles** instead of hardcoded credentials
-- ❌ Don't store in environment variables
-- ❌ Don't check into version control
+> Each scenario has two plausible answers. The wrong choice is what a real architect might reach for; the right choice is what AWS rewards on the exam.
 
-### Scenario 2: Cross-Account Access for Partner Company
-**Problem:** Partner needs to access S3 bucket in your account
-**Solution Path:**
-1. Create IAM **role in your account**
-2. Set **trust relationship** to partner AWS account
-3. Add **external ID** to prevent confused deputy
-4. Set **permissions** to S3 bucket (least privilege)
-5. Partner assumes role from their account
-6. **Never** share IAM credentials
+### Trap 1: SCP vs Resource Control Policy (RCP)
+**Question type:** "Prevent S3 bucket owners from disabling server-side encryption, even if they modify their own bucket policies."
 
-### Scenario 3: Data Exfiltration Detection
-**Problem:** Concern about large data transfers
-**Solution Path:**
-- **Enable CloudTrail** for S3 API logging
-- **Enable Macie** for data discovery & anomalies
-- **Enable GuardDuty** for threat detection
-- **Set CloudWatch alarms** for unusual API activity
-- **Enable VPC Flow Logs** for network analysis
-- **Use S3 access advisor** to identify unused permissions
+| Control | What It Restricts |
+|---------|-------------------|
+| **SCP** | What IAM **principals** in the account can **call** (actions) |
+| **RCP** | What **resources** in the account will **accept** (conditions on inbound requests) |
 
-### Scenario 4: Compliance Audit Required
-**Problem:** Need to prove security controls
-**Solution Path:**
-- **CloudTrail** - Shows all API calls
-- **Config** - Configuration changes over time
-- **AWS Config rules** - Compliance violations
-- **CloudWatch** - Metrics and alarms
-- **Security Hub** - Centralized findings
-- **Access Analyzer** - Permission analysis
-- **Organization Trail** - All linked accounts
+✅ **Right:** RCP on S3 denying `s3:PutObject` unless `s3:x-amz-server-side-encryption` is present — enforces encryption on the resource regardless of who calls it or what their identity policy says.
+❌ **Wrong:** SCP only — SCPs restrict the calling principal but cannot enforce what the resource itself will accept from all principals.
 
-### Scenario 5: Encryption Key Compromised
-**Problem:** Someone has access to your KMS key
-**Solution Path:**
-1. **Immediately disable the key** in KMS console
-2. **Create new CMK** for future encryption
-3. **Re-encrypt data** with new key
-4. **Schedule key deletion** (7-30 day waiting period)
-5. **Investigate access** via CloudTrail
-6. **Audit permissions** on the key
-7. **Revoke compromised credentials**
+---
+
+### Trap 2: Firewall Manager vs CloudFormation StackSets for WAF
+**Question type:** "Ensure every ALB across 40 accounts has the same WAF WebACL. Developers must not be able to remove it."
+
+✅ **Right:** Firewall Manager WAF policy (delegated admin) — auto-deploys WebACL to all ALBs in scope, automatically remediates non-compliant resources, and member accounts cannot detach the managed WebACL.
+❌ **Wrong:** CloudFormation StackSets — deploys WAF rules once, but does NOT prevent a developer from manually detaching the WebACL from their ALB after deployment.
+
+---
+
+### Trap 3: AWS RAM vs Resource-Based Policy for Sharing
+**Question type:** "Share a Transit Gateway with 15 member accounts in the same Organisation."
+
+✅ **Right:** AWS RAM — Transit Gateway does not support resource-based policies; RAM is the only way to share it cross-account.
+❌ **Wrong:** Resource-based policy — Transit Gateways, VPC subnets, and Route 53 Resolver rules have no resource-based policy support.
+
+**Decision rule:**
+| Resource | Share via |
+|----------|-----------|
+| S3, KMS, Lambda, Secrets Manager, SNS | Resource-based policy |
+| Transit Gateway, VPC subnet, License configs, Route 53 Resolver rules | AWS RAM |
+
+---
+
+### Trap 4: GuardDuty S3 Protection Must Be Explicitly Enabled
+**Question type:** "GuardDuty is enabled across all accounts. Security team notices it is not detecting unusual S3 API access patterns."
+
+✅ **Right:** Enable **GuardDuty S3 Protection** plan — S3 data event monitoring is OFF by default. Core GuardDuty only consumes CloudTrail management events, VPC Flow Logs, and DNS logs.
+❌ **Wrong:** "Enable CloudTrail S3 Data Events separately" — GuardDuty pulls S3 data events directly when the protection plan is on; a separate trail is not required.
+
+---
+
+### Trap 5: Declarative Policies vs SCPs for Service Configuration Enforcement
+**Question type:** "Enforce IMDSv2 (token-required) on all EC2 instances in every account, even if account admins try to override it."
+
+✅ **Right:** **Declarative Policy** for EC2 metadata defaults — enforces a baseline service configuration that cannot be overridden at the account or instance level.
+❌ **Wrong:** SCP denying `ec2:ModifyInstanceMetadataOptions` — this can be bypassed at launch via `--metadata-options` in the RunInstances call, and does not address existing instances.
+
+---
+
+### Trap 6: KMS Cross-Account Encrypted Snapshot
+**Question type:** "Share an EBS snapshot encrypted with your CMK to Account B. Account B needs to create volumes from it."
+
+✅ **Right:** Share snapshot + add Account B to the **source CMK key policy** (`kms:ReEncrypt*`, `kms:CreateGrant`, `kms:DescribeKey`) → Account B copies the snapshot re-encrypting with their own CMK → creates volumes from the copy.
+❌ **Wrong (security anti-pattern — explicitly marked wrong):** Creating an unencrypted intermediate snapshot to share it.
+
+---
+
+### Trap 7: Security Hub vs Amazon Detective for Incident Investigation
+**Question type:** "A GuardDuty finding shows EC2 communicating with a known cryptocurrency mining endpoint. Team needs to trace the timeline and identify the attack path."
+
+| Service | Purpose |
+|---------|---------|
+| **Security Hub** | Aggregates findings; compliance status; automation rules — not investigation |
+| **Amazon Detective** | ML graph-based investigation — traces relationships between findings, IPs, roles, and time |
+
+✅ **Right:** Amazon Detective — root cause analysis and investigation of an existing finding.
+❌ **Wrong:** Security Hub — aggregates and reports findings but does not help trace what happened or why.
 
 ---
 
@@ -1845,12 +2573,12 @@ arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
 ```
 
 ### Mistake 3: Sharing Encrypted Snapshots Directly
-- **Problem:** EC2 snapshots encrypted with customer KMS key cannot be directly shared
-- **Solution:** 
-  1. Join shared snapshot to EC2 instance
-  2. Create unencrypted snapshot
-  3. Re-encrypt with recipient's key
-  4. OR use shared KMS key grants
+- **Problem:** EC2 snapshots encrypted with a customer-managed KMS key cannot be directly shared without key access
+- **Correct solution:**
+  1. Share the encrypted snapshot with the target account (`ModifySnapshotAttribute`)
+  2. Add the target account to the **source CMK key policy** so it can use the key
+  3. Target account copies the snapshot, re-encrypting with their own CMK
+> ⚠️ Creating an **unencrypted intermediate snapshot** is a security anti-pattern — the exam marks this WRONG
 
 ### Mistake 4: Not Enabling MFA Delete on S3
 - **Problem:** Anyone with delete permission can delete s3 objects
@@ -1883,33 +2611,6 @@ arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
 
 ---
 
-## PERFORMANCE OPTIMIZATION TIPS
-
-### CloudTrail Optimization
-- **Use S3 prefix** to organize trails by date/service
-- **Enable log file validation** for integrity
-- **Use Athena** for querying large volumes
-- **Partition by date** for faster Athena queries
-
-### CloudWatch Cost Optimization
-- **Filter logs at source** to reduce ingestion
-- **Adjust retention** from 1 month to 1 week if possible
-- **Use log sampling** for high-volume logs
-- **Archive to S3** via Kinesis Firehose
-
-### KMS Cost Optimization
-- **Use S3 Bucket Keys** to reduce encryption API calls
-- **Data key caching** reduces KMS API calls
-- **Use SSE-S3** for non-sensitive data (free)
-- **Batch operations** to encrypt in bulk
-
-### VPC Flow Logs Optimization
-- **Filter out internal traffic** to reduce costs
-- **Send only to S3** for cost savings vs CloudWatch
-- **Aggregate to CloudWatch via Firehose**
-
----
-
 ## EXAM QUESTION PATTERNS
 
 ### Pattern 1: "Which service provides..."
@@ -1917,7 +2618,27 @@ arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
 - **Threat detection?** → GuardDuty
 - **Configuration tracking?** → Config
 - **API logging?** → CloudTrail
-# 📊 DOMAIN 5: LOGGING, MONITORING & THREAT DETECTION (20%)
+# 📊 DOMAIN 5: LOGGING, MONITORING & THREAT DETECTION
+
+---
+
+## Logging Service Decision Table
+
+The most commonly confused domain on the exam. Match the requirement to the correct service before reading answer options.
+
+| Requirement | Correct service | Common wrong answer |
+|------------|----------------|--------------------|
+| Record AWS API calls | CloudTrail | CloudWatch |
+| Application / OS / container logs | CloudWatch Logs | CloudTrail |
+| Real-time threat detection | GuardDuty | CloudTrail |
+| Check resource configuration compliance | AWS Config | GuardDuty |
+| Aggregate security findings across accounts | Security Hub | CloudWatch |
+| Centralise logs into a queryable security data lake | Amazon Security Lake | S3 alone |
+| Stream and deliver logs in real-time | Kinesis Firehose | CloudWatch Logs Insights |
+| SQL query on CloudTrail (lowest overhead) | CloudTrail Lake | S3 + Athena |
+| Investigate root cause of a finding | Amazon Detective | Security Hub |
+
+> ⚠️ **GuardDuty ≠ compliance. Config ≠ threat detection. CloudWatch ≠ aggregation.** These are the three pairs the exam exploits most.
 
 ---
 
@@ -2064,6 +2785,26 @@ GuardDuty Finding (High severity)
 - Delegated admin sees all findings from all accounts in one pane.
 - Member accounts **cannot disable** GuardDuty once enrolled by admin.
 - Suppression rules (suppress low-value findings) managed centrally.
+
+### GuardDuty Protection Plans (Must Be Explicitly Enabled)
+GuardDuty core protects EC2 and IAM. The following are **add-on protection plans that are OFF by default** and must be enabled separately:
+
+| Protection Plan | What It Detects | Data Source Added |
+|----------------|-----------------|-------------------|
+| **S3 Protection** | Unusual S3 access patterns, public exposure, policy changes | CloudTrail S3 Data Events |
+| **EKS Audit Log Monitoring** | Suspicious Kubernetes API calls, privilege escalation in K8s | EKS Audit Logs |
+| **EKS Runtime Monitoring** | Container runtime threats (process injection, crypto mining) | EKS Runtime Agent |
+| **Lambda Network Activity Monitoring** | Lambda functions calling malicious endpoints or unusual IPs | Lambda Network Logs |
+| **RDS Protection** | Unusual login patterns, credential scanning, brute force | RDS Login Events |
+| **EC2 Malware Protection** | Scan EBS volumes for malicious files without agent | EBS snapshot scan |
+| **EC2/ECS Runtime Monitoring** | Process executions, file access, network inside EC2 containers | Runtime Agent |
+
+**Exam trap:** Enabling GuardDuty does NOT automatically protect S3, EKS, Lambda, or RDS — you must explicitly enable each protection plan.
+
+### Extended Threat Detection
+- Correlates multiple findings across multiple data sources to detect sophisticated, multi-stage attacks.
+- Example: Detects when an IAM credential theft leads to lateral movement then S3 exfiltration — connects events as a single attack sequence.
+- Generates a summary finding in addition to individual findings.
 
 ### Trusted IP Lists & Threat Lists
 - **Trusted IP list:** IPs that GuardDuty will NOT generate findings for (e.g., your pen test IPs, approved CIDR blocks).
@@ -2277,7 +3018,146 @@ version account-id interface-id srcaddr dstaddr srcport dstport protocol packets
 
 ---
 
-# 🚨 DOMAIN 6: INCIDENT RESPONSE & AUTOMATION (7%)
+## AWS Transit Gateway Flow Logs
+
+**What it is:** Capture metadata for traffic passing through a Transit Gateway — covers **east-west traffic between VPCs** that VPC Flow Logs per-VPC cannot aggregate.
+
+### Key Facts
+- Same format as VPC Flow Logs (version 2+ fields).
+- Captures traffic at the **Transit Gateway attachment level** — includes VPC-to-VPC, VPN-attached, and Direct Connect-attached traffic.
+- Destinations: **S3**, **CloudWatch Logs**, **Kinesis Data Firehose**.
+- Use case: Centralized visibility for hub-and-spoke architectures; detect lateral movement between VPCs.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Monitor all inter-VPC traffic in a hub-and-spoke architecture | Transit Gateway Flow Logs |
+| VPC Flow Logs per VPC — too many to manage for 50 VPCs | Enable Transit Gateway Flow Logs centrally |
+| Detect east-west lateral movement between VPCs | Transit Gateway Flow Logs |
+
+---
+
+## Amazon Route 53 Resolver — DNS Query Logging
+
+**What it is:** Logs all DNS queries made by resources in your VPC to Route 53 Resolver — enables detection of DNS-based attacks and exfiltration.
+
+### What Gets Logged
+- DNS query name (domain requested)
+- Query type (A, AAAA, MX, TXT, etc.)
+- Response code (NOERROR, NXDOMAIN, SERVFAIL)
+- VPC ID and source IP of querying instance
+- Timestamp
+
+### DNS Security Use Cases
+| Threat | Detection Method |
+|--------|--------------------|
+| **DNS tunneling** | Long TXT record queries to unusual domains |
+| **DNS exfiltration** | High-frequency queries encoding data in subdomains |
+| **C2 via DNS** | Queries to known malicious domains (blocked by Route 53 Resolver DNS Firewall) |
+| **Domain generation algorithm (DGA)** | GuardDuty Threat Intelligence on DNS queries |
+
+### Route 53 Resolver DNS Firewall
+- Block or allow DNS queries based on **domain lists** (AWS managed + custom).
+- Integrates with Route 53 Resolver query logging.
+- Block categories: malware, phishing, botnet C2, cryptocurrency mining.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Detect DNS exfiltration from EC2 instances | Route 53 Resolver DNS Query Logging + GuardDuty |
+| Block DNS queries to known malicious domains | Route 53 Resolver DNS Firewall |
+| GuardDuty finding: EC2 contacting known C2 via DNS | GuardDuty reads Resolver query logs (no config needed) |
+
+---
+
+## API Gateway — Logging Configuration
+
+**What it is:** Two logging mechanisms for API Gateway — execution logs (debugging) and access logs (audit).
+
+### Two Log Types
+| Log Type | What It Captures | Destination |
+|----------|-----------------|-------------|
+| **Execution Logs** | Detailed request/response flow, auth decisions, Lambda integration errors | CloudWatch Logs |
+| **Access Logs** | Who called the API (IP, auth token, status), in custom or CLF/JSON/XML format | CloudWatch Logs or Kinesis Firehose |
+
+### Common Exam Trap — CloudWatch Logs Role
+- To enable execution or access logging, the API Gateway stage must have a **CloudWatch Logs role ARN** configured at the **account level** (not just stage level).
+- Troubleshooting: If API Gateway logs are not appearing in CloudWatch → check the account-level CW Logs role ARN is set.
+
+### Access Log Fields (key ones)
+`$context.identity.sourceIp`, `$context.requestId`, `$context.httpMethod`, `$context.resourcePath`, `$context.status`, `$context.authorizer.principalId`
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| API Gateway logs not appearing in CloudWatch | Check account-level CloudWatch Logs role ARN is configured |
+| Audit every API call to a REST API including caller identity | Enable API Gateway access logs with authorizer fields |
+| Debug Lambda integration errors via API Gateway | Enable API Gateway execution logs |
+| Monitor API request rates and errors | CloudWatch metrics (automatic) + API Gateway access logs |
+
+---
+
+## Amazon CloudFront — Security Logging
+
+### Two Log Types
+| Type | Delivery | Latency | Use Case |
+|------|----------|---------|----------|
+| **Standard (Access) Logs** | S3 bucket | Minutes to hours | Long-term audit, compliance |
+| **Real-Time Logs** | Kinesis Data Streams | <1 second | Live traffic monitoring, WAF correlation |
+
+### Standard Log Fields (key)
+`cs-uri-stem`, `sc-status`, `cs-method`, `x-edge-location`, `x-forwarded-for`, `cs(User-Agent)`, `cs-uri-query`, `x-edge-result-type` (Hit/Miss/Error)
+
+### CloudFront Security Features
+| Feature | Description |
+|---------|-------------|
+| **Origin Access Control (OAC)** | Restrict S3 origin to CloudFront only — S3 denies all direct requests. Successor to OAI |
+| **Custom Headers from CloudFront** | Add a secret header (e.g., `X-CF-Secret`) → origin ALB only accepts requests with this header |
+| **Field-Level Encryption** | Encrypt specific POST fields (e.g., credit card) at the edge; only specified app components can decrypt |
+| **Geographic Restrictions** | Whitelist/blacklist countries at the CloudFront distribution level |
+| **Signed URLs / Signed Cookies** | Time-limited access to specific content; signed with a CloudFront key pair |
+| **HTTPS enforcement** | Redirect HTTP to HTTPS or reject HTTP entirely at the distribution |
+| **WAF integration** | Attach AWS WAF to CloudFront for global L7 protection |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Restrict S3 content to only CloudFront requests | S3 Origin Access Control (OAC) + bucket policy |
+| Block requests without secret header at origin | CloudFront custom origin header + ALB rule |
+| Encrypt credit card field before it reaches origin | CloudFront field-level encryption |
+| Block users from specific countries | CloudFront geographic restriction |
+| Real-time log correlation with WAF events | CloudFront real-time logs → Kinesis |
+
+---
+
+## Amazon Managed Grafana — Security Deep Dive
+
+**What it is:** Fully managed Grafana service for operational dashboards and metrics visualization from multiple AWS data sources and security monitoring platforms.
+
+### Authentication and Access
+| Method | Details |
+|--------|---------|
+| **IAM Identity Center (SSO)** | Primary auth method — federate with corporate IdP |
+| **SAML 2.0** | Direct SAML federation for orgs not using IAM Identity Center |
+
+### Data Source Permissions
+- Each data source connection uses **IAM roles** — Grafana assumes a service role per data source.
+- Data source permissions can be scoped so teams only see specific dashboards or data sources.
+- Supports: CloudWatch, OpenSearch, Prometheus, X-Ray, Timestream, Athena, and 3rd-party SIEMs.
+
+### Security Monitoring Use Cases
+- Visualize **Security Hub findings** over time as dashboards.
+- Build SOC dashboards from **Amazon Security Lake** OCSF data (via Athena).
+- Monitor **GuardDuty** finding trends and severity distributions.
+- Correlate **CloudWatch metrics** with security events.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Centralized security dashboard across all accounts | Amazon Managed Grafana + Security Hub / Security Lake data sources |
+| SOC team needs real-time security metrics with SSO | Managed Grafana + IAM Identity Center |
+
+---
 
 ---
 
@@ -2450,7 +3330,135 @@ GuardDuty High-Severity Finding
 
 ---
 
-# 🎯 FINAL EXAM STRATEGY
+## Incident Response — Six-Phase Framework
+
+```
+PREPARATION → DETECTION → CONTAINMENT → ERADICATION → RECOVERY → LESSONS LEARNED
+```
+
+| Phase | Key Activities |
+|-------|---------------|
+| **1. Preparation** | IR runbooks, IAM break-glass roles, forensic VPC pre-built, S3 evidence bucket, SNS alerts configured |
+| **2. Detection** | GuardDuty finding, CloudTrail Insights, Security Hub score drop, CloudWatch alarm, manual alert |
+| **3. Containment** | Isolate SG, revoke IAM credentials, block IP at WAF/NACL/Network Firewall, quarantine instance |
+| **4. Eradication** | Remove malware, patch vulnerability, rotate all affected credentials |
+| **5. Recovery** | Restore from clean backup/AMI, validate integrity, re-enable services incrementally |
+| **6. Lessons Learned** | Root cause analysis, update runbooks, improve detection rules, file AWS security report |
+
+### Containment Strategies
+| Resource Type | Containment Method |
+|--------------|-------------------|
+| **Network (block inbound)** | Modify Security Group — deny all inbound |
+| **Network (block subnet)** | NACL deny — overrides SG; apply to whole subnet |
+| **Network (VPC level)** | Network Firewall drop rule or WAF block rule |
+| **Route isolation** | Modify route table — remove internet gateway route |
+| **Identity** | `PutUserPolicy` inline Deny with `aws:TokenIssueTime` condition |
+| **IAM key** | Deactivate access key via `UpdateAccessKey` |
+| **IAM Identity Center** | Revoke active sessions in Identity Center console |
+| **EC2** | Detach instance profile (IAM role), isolate with empty SG |
+
+---
+
+## Systems Manager OpsCenter — Operational Issue Tracking
+
+**What it is:** Centralized dashboard for viewing, investigating, and resolving **OpsItems** — operational issues generated by AWS services.
+
+### Key Concepts
+| Concept | Description |
+|---------|-------------|
+| **OpsItem** | A data record representing an issue — includes details, related resources, runbooks, investigation data |
+| **Auto-creation** | EventBridge rules, CloudWatch alarms, Config rules, and Security Hub findings can auto-create OpsItems |
+| **Runbook integration** | SSM Automation runbooks linked to OpsItems for one-click remediation |
+| **Cross-account aggregation** | Organizations integration — aggregate OpsItems from all member accounts in admin account |
+| **Deduplication** | Similar OpsItems grouped to avoid alert storm |
+
+### Security Use Cases
+- GuardDuty finding → EventBridge rule → creates OpsItem with remediation runbook linked.
+- Config rule violation → auto-creates OpsItem with affected resource details.
+- Centralized view of all security incidents across Org accounts.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Central tracking of security incidents across all AWS accounts | Systems Manager OpsCenter + Organizations |
+| Auto-create ticket when GuardDuty finding fires | EventBridge rule → SSM OpsCenter OpsItem |
+| One-click remediation from incident ticket | OpsCenter with linked SSM Automation runbook |
+
+---
+
+## AWS Resilience Hub — RTO/RPO Assessment
+
+**What it is:** Analyzes application resilience, identifies resiliency gaps, and provides recommendations to meet RTO (Recovery Time Objective) and RPO (Recovery Point Objective) targets.
+
+### How It Works
+1. **Import application definition** from CloudFormation stack, Resource Groups, AppRegistry, or Terraform.
+2. **Set resiliency policy** — define RTO and RPO targets per disruption type (AZ outage, hardware failure, region outage).
+3. **Run assessment** — Resilience Hub evaluates alarms, backups, and recovery procedures.
+4. **Recommendations** — provided if RTO/RPO targets are not met (e.g., enable Multi-AZ, add backup policy).
+5. **Score** — Resiliency score (0–100) tracks improvement over time.
+
+### Integration with AWS Backup
+- Resilience Hub automatically checks if resources have compliant backup policies meeting the RPO targets.
+- Creates alarms and runbooks linked to AWS Backup for recovery.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Verify application can recover within defined RTO/RPO | AWS Resilience Hub assessment |
+| Company needs resiliency score and gap analysis | AWS Resilience Hub |
+| Automate resiliency assessment in CI/CD pipeline | Resilience Hub API in CodePipeline |
+
+---
+
+## AWS Fault Injection Service (FIS) — Chaos Engineering
+
+**What it is:** Managed chaos engineering service for running controlled fault injection experiments to test system resilience.
+
+### Core Concepts
+| Concept | Description |
+|---------|-------------|
+| **Experiment Template** | Defines targets, actions (faults), stop conditions, and IAM role |
+| **Actions** | Inject CPU stress, network latency, AZ outage, EC2 termination, ECS task kill, RDS failover |
+| **Targets** | EC2 instances, ECS tasks, EKS nodes, RDS instances, Spot instances — filtered by tags or IDs |
+| **Stop Conditions** | CloudWatch alarm threshold — FIS automatically halts experiment if alarm fires |
+| **Blast Radius** | Use filters and percentage-based targeting to limit impact |
+
+### Security Considerations
+- FIS requires an **IAM role** with permissions to perform each fault action.
+- Stop conditions using CloudWatch alarms limit damage from runaway experiments.
+- Experiments can be run in a **non-production VPC** or staging environment first.
+- All experiment actions are logged in **CloudTrail**.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Test if app survives AZ failure without real outage | AWS FIS experiment template with AZ disruption action |
+| Safely limit chaos experiment blast radius | FIS stop conditions on CloudWatch alarm |
+| Validate RTO after chaos injection | FIS + AWS Resilience Hub assessment post-experiment |
+
+---
+
+## Amazon Application Recovery Controller (ARC)
+
+**What it is:** Enables continuous readiness checking and fast, safe failover for multi-region, multi-AZ applications.
+
+### Two Capabilities
+| Capability | Purpose |
+|-----------|---------|
+| **Readiness Checks** | Continuously verify that recovery resources (replicas, backups, routing) are sufficient to handle failover |
+| **Routing Controls** | Manual or automated switches to redirect traffic during failover (backed by Route 53 health checks) |
+
+### Safety Rules on Routing Controls
+- Define constraints on routing control state changes — prevent unsafe failovers.
+- Example: "At least 1 cell must remain active" — prevents accidentally routing 0% traffic.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Verify multi-region readiness before a failover drill | ARC Readiness Checks |
+| Rapid manual failover to DR region with safety guardrails | ARC Routing Controls + Safety Rules |
+
+---
 
 ## Time Management
 - **65 questions in 170 minutes** = 2.5 min/question
@@ -2496,25 +3504,35 @@ GuardDuty High-Severity Finding
 
 ## Domain Priorities
 
-1. **IAM (25%)** ← Study HARD
-   - Policy evaluation logic
-   - Cross-account access
-   - Trust relationships
+1. **IAM** ← Study HARD
+   - Policy evaluation logic (all 6 layers)
+   - Cross-account access + trust relationships
+   - Verified Permissions (Cedar), Roles Anywhere, Directory Service
    
-2. **Infrastructure (26%)**
-   - SG vs NACL differences
-   - VPC endpoints
-   - WAF rules
+2. **Infrastructure Security**
+   - SG vs NACL differences (stateful vs stateless)
+   - VPC endpoints, WAF, Network Firewall
+   - Session Manager, EC2 Image Builder, Patch Manager
    
-3. **Data (22%)**
-   - KMS key policy + IAM
-   - S3 encryption + access
+3. **Data Protection**
+   - KMS key policy + IAM (both required)
+   - S3 encryption + Object Lock
+   - Imported keys, XKS, Signer, Nitro encryption
    
-4. **Logging (20%)**
-   - CloudTrail, GuardDuty, Config
+4. **Detection & Logging**
+   - CloudTrail (data events off by default), GuardDuty protection plans
+   - CloudWatch Data Protection, SNS Data Protection
+   - Transit GW logs, Route 53 Resolver logs
    
-5. **Incident Response (7%)**
-   - Automation with Lambda
+5. **Incident Response**
+   - Automation: EventBridge + Lambda
+   - Forensics playbooks, OpsCenter, Resilience Hub, FIS
+   - Six-phase IR framework + containment strategies
+   
+6. **Governance** ← New SCS-C03 content
+   - RCPs (restrict resources) + Declarative Policies (enforce config)
+   - Control Tower proactive controls (CloudFormation Hooks)
+   - CloudFormation Guard, Service Catalog, RAM
 
 ---
 
@@ -2547,6 +3565,72 @@ When in doubt, pick answer that:
 **Document:** AWS Security Specialty (SCS-C03) Strategic Cheatsheet  
 **Last Updated:** March 18, 2026
 
+## FAST RECALL — EXAM HEURISTICS
+
+### Layered Security Rule
+When a question asks for the **BEST**, **MOST SECURE**, or **MINIMUM RISK** solution, a single-control answer is almost always wrong. The correct answer combines at least two layers:
+
+| Layer | Controls |
+|-------|----------|
+| **Network** | VPC Endpoint, Security Group, NACL, Network Firewall |
+| **Identity** | IAM policy, Resource policy, SCP, Permission Boundary |
+| **Monitoring** | GuardDuty, Config, CloudTrail |
+
+> ❌ "Use a bucket policy" alone → wrong
+> ✅ "Use VPC Endpoint + bucket policy restricting `aws:SourceVpc`" → right
+
+### GuardDuty vs Inspector Discriminator
+Both detect security issues but answer completely different questions:
+
+| Service | Mental Model | Trigger Keywords |
+|---------|-------------|------------------|
+| **GuardDuty** | Behavior-based — ML + log analysis detects *what is happening* | compromise, anomaly, suspicious activity, threat, C2, exfiltration |
+| **Inspector** | Vulnerability-based — CVE database scan detects *what could happen* | vulnerability, CVE, outdated package, unpatched, container image scan |
+
+> ❌ Trap: Both appear as "security detection" options. Split on **behavior vs. vulnerability**.
+
+### Cross-Account Mechanism Discriminator
+AssumeRole is NOT the only cross-account mechanism — but it's the right one in most exam scenarios:
+
+| Situation | Correct mechanism |
+|-----------|------------------|
+| Application/service in Account A needs to act in Account B | STS `AssumeRole` — creates session in Account B |
+| Account B principal reads/writes a specific resource in Account A | Resource-based policy on the resource (S3, KMS, SQS, Lambda) — no role assumption needed |
+| S3 cross-account object access | S3 bucket policy (Account A) + IAM identity policy (Account B) — both required |
+
+> ❌ Trap: "Cross-account" doesn't always mean AssumeRole. If the question is about accessing a named resource (S3 bucket, KMS key), a resource policy may be the simpler correct answer.
+
+### NAT Gateway vs VPC Endpoint
+The exam trap is treating them as equivalent private-access options:
+
+| Feature | NAT Gateway | VPC Endpoint |
+|---------|------------|-------------|
+| **What it provides** | Outbound internet routing for private instances | Private path to specific AWS services |
+| **Traffic destination** | Any internet host | Only the target AWS service |
+| **Policy enforcement** | ❌ None — routing only | ✅ Endpoint policy restricts which API actions and resources |
+| **Data stays in AWS?** | ❌ No — goes to internet | ✅ Yes — never leaves AWS network |
+| **Cost** | Per GB processed | Gateway (S3/DynamoDB) = free; Interface = hourly |
+
+> Rule: NAT = routing. VPC Endpoint = routing **plus** security control. When the question says "private access" or "no internet" → always Endpoint.
+
+---
+
+### Data Exfiltration Prevention Pattern (S3)
+To prevent data leaving AWS via S3, you must combine **both**:
+
+1. **VPC Endpoint** (Gateway type for S3) — force all S3 traffic through private network
+2. **Bucket policy** denying requests that do NOT come through the endpoint:
+   ```json
+   { "Effect": "Deny", "Principal": "*", "Action": "s3:*", "Resource": "...",
+     "Condition": { "StringNotEquals": { "aws:SourceVpce": "vpce-xxxx" } } }
+   ```
+
+> ❌ Bucket policy alone — a user outside the VPC can still access S3 directly
+> ❌ Security Groups — **do not apply to S3** (S3 is a regional service, not VPC-attached)
+> ✅ VPC Endpoint + `aws:SourceVpce` bucket policy condition = enforced private-only access
+
+---
+
 ## LAST-MINUTE REVIEW CHECKLIST
 
 - [ ] **Root account:** Has MFA, not used regularly
@@ -2567,6 +3651,7 @@ When in doubt, pick answer that:
 **Study Tip:** Review at least 3-5 practice exams before attempting the real exam. Each exam typically has 2-3 questions per domain, with emphasis on IAM and infrastructure protection.
 
 **Last Minute Tips:**
+- **Read the LAST sentence of the question first** — it tells you the intent (detect/prevent/audit/encrypt) before you're distracted by the scenario details
 - Read questions carefully (trick answers are common)
 - Eliminate obvious wrong answers first
 - Look for "best practice" vs "works but suboptimal"
@@ -2576,246 +3661,616 @@ When in doubt, pick answer that:
 
 ---
 
-**Consolidated Cheatsheet Complete** ✓
 
-# AWS Security Specialty (SCS-C03) — REAL Cheat Sheet
-
----
-
-## 🧠 1. IAM — POLICY EVALUATION (CRITICAL)
-
-### Evaluation Order
-1. Explicit DENY → FINAL DENY
-2. SCP (Org level)
-3. Permission Boundary
-4. IAM Policy
-5. Resource Policy
-
-> ANY DENY = DENY
+# 🏛️ DOMAIN 7: SECURITY GOVERNANCE & COMPLIANCE
 
 ---
 
-## 🔥 Cross-Account Access
+## AWS Organizations Policy Types — Overview
 
-**Correct Pattern:**
-- STS AssumeRole
-- Trust Policy (target account)
-- Permission Policy (source account)
+SCS-C03 covers **five policy types** in AWS Organizations, each with a distinct scope and purpose:
 
-**Avoid:**
-- Access keys sharing
-- Direct IAM users
-
----
-
-## 🧠 When to Use What
-
-| Scenario | Service |
-|---------|--------|
-| AWS internal app | IAM Role |
-| External app | STS |
-| Enterprise login | SAML |
-| Social login | Cognito |
+| Policy Type | Affects | Purpose |
+|-------------|---------|---------|
+| **SCP** (Service Control Policy) | IAM principals in member accounts | Restrict what principals can do |
+| **RCP** (Resource Control Policy) | AWS resources in member accounts | Restrict what any principal can do to resources |
+| **Declarative Policy** | Service configurations (EC2 attributes) | Enforce desired resource configuration state |
+| **Tag Policy** | Resource tagging | Enforce consistent tag keys and values |
+| **AI Service Opt-Out Policy** | AI services (Comprehend, Rekognition, etc.) | Control whether AWS can use your data for model training |
 
 ---
 
-## ⚠️ Traps
-- SCP does NOT grant permissions
-- Root user = never use
+## Service Control Policies (SCPs) — Recap
+
+- Restrict **what IAM principals (users/roles) can do** in member accounts.
+- Applied to OUs or accounts — evaluated BEFORE IAM policies.
+- **Do NOT apply to management account** and **do NOT apply to service-linked roles**.
+- **Never grant permissions on their own** — only restrict.
 
 ---
 
-## 🔐 2. KMS (HIGH WEIGHT)
+## Resource Control Policies (RCPs) — NEW SCS-C03 Topic
 
-### Core Concept
-- KMS manages keys, NOT data
+**What it is:** A new Organizations policy type that restricts what **any principal (including external principals)** can do to resources in your organization's member accounts.
 
----
+### SCP vs RCP
+| Aspect | SCP | RCP |
+|--------|-----|-----|
+| **What it restricts** | **Principals** — limits what identities can do | **Resources** — limits what can be done to resources |
+| **Applies to external principals** | ❌ No — only org principals | ✅ Yes — blocks even cross-account external access |
+| **Use case** | Prevent org principals from using certain services | Prevent anyone (including external accounts) from accessing your resources in insecure ways |
+| **Example** | Deny ec2:TerminateInstances across all accounts | Require all S3 PutObject requests to use SSE-KMS |
 
-### Envelope Encryption
-- KMS encrypts data key
-- Data key encrypts actual data
+### What RCPs Can Do
+- Require S3 objects to only be accessed over HTTPS (deny HTTP).
+- Require SSE-KMS on all S3 PutObject calls within the org.
+- Prevent any external principal from accessing specific resource types.
+- Complement SCPs: SCPs prevent principals FROM doing things; RCPs prevent things FROM BEING DONE to resources.
 
----
+### RCP Example — Enforce HTTPS for all S3 Access
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyNonHTTPS",
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": "*",
+    "Condition": {
+      "Bool": { "aws:SecureTransport": "false" }
+    }
+  }]
+}
+```
 
-### Access Requirements
-- IAM Policy → Allow
-- Key Policy → Allow
-
-> BOTH required
-
----
-
-### Key Types
-
-| Type | Use |
-|-----|-----|
-| AWS-managed | Simple |
-| Customer-managed | Full control |
-
----
-
-### Traps
-- Region-specific
-- Cross-account requires key policy + IAM
-
----
-
-## 🪣 3. S3 SECURITY
-
-### Priority Order
-1. Block Public Access (BPA)
-2. Bucket Policy
-3. IAM Policy
-
----
-
-### Encryption
-- Default → SSE-KMS
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent external principals from accessing org S3 buckets without encryption | RCP |
+| Ensure all S3 buckets in org cannot be accessed via HTTP | RCP denying insecure transport |
+| SCP blocks principals from doing X — what blocks external access to resources? | RCP (Resource Control Policy) |
+| New SCS-C03 policy that limits resource-level access org-wide | RCP |
 
 ---
 
-### Access Patterns
+## Declarative Policies
 
-| Scenario | Solution |
-|--------|---------|
-| Public site | Bucket Policy |
-| Private app | IAM Role |
-| Cross-account | Bucket + IAM |
+**What it is:** Enforce a desired **configuration state** for services regardless of any API calls — configuration is enforced continuously, not just at creation time.
 
----
+### Current Scope
+- **EC2 attributes**: IMDSv2 enforcement, EBS default encryption, allowed VPC endpoints, instance metadata token hop limit.
 
-### Traps
-- ACLs = almost always WRONG
-- BPA overrides everything
+### How They Work
+- Unlike SCPs (which say "you can't call this API"), Declarative Policies say "this attribute **must be** this value on all resources in these accounts."
+- If an EC2 instance is launched without IMDSv2, the Declarative Policy **enforces** the setting at launch — the instance gets IMDSv2 automatically.
 
----
+### Key Use Cases
+| Use Case | What to Enforce |
+|----------|----------------|
+| Enforce IMDSv2 on all EC2 instances | `aws:ec2:DefaultImdsV2` = `required` |
+| Require EBS encryption by default | `aws:ec2:EbsDefaultKmsKeyId` + encryption enabled |
+| Restrict allowed instance metadata hop limit | Prevents SSRF escalation via IMDSv1/IMDSv2 tokens |
 
-## 🌐 4. NETWORK SECURITY
-
-### SG vs NACL
-
-| Feature | SG | NACL |
-|--------|----|------|
-| Stateful | Yes | No |
-| Allow/Deny | Allow only | Allow + Deny |
-
-> Default answer = Security Group
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Ensure IMDSv2 is required across ALL EC2 in org regardless of launch parameters | Declarative Policy |
+| What's the difference between SCP denying IMDSv1 vs Declarative Policy? | SCP denies the API call; Declarative Policy **enforces** the attribute state at the platform level |
 
 ---
 
-### Private AWS Access
+## AI Service Opt-Out Policies
 
-| Service | Endpoint |
-|--------|---------|
-| S3/DynamoDB | Gateway |
-| Others | Interface |
+**What it is:** Controls whether AWS AI services (Amazon Comprehend, Rekognition, Kendra, CodeGuru, Translate, etc.) can use your content to improve their models.
 
----
+- By default, AWS may use your content inputs/outputs for service improvements.
+- Opt-Out Policy at the Organization level **prevents this for all member accounts**.
+- Policy is set per-service or for all opt-outable AI services at once.
 
-### NAT vs Endpoint
-- NAT → Internet required
-- Endpoint → Private AWS access
-
----
-
-## 🛡️ 5. THREAT DETECTION
-
-| Service | Purpose |
-|--------|--------|
-| GuardDuty | Threat detection |
-| Macie | PII detection (S3) |
-| Security Hub | Aggregation |
-| Inspector | Vulnerabilities |
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent AWS from training AI models with your Rekognition or Comprehend data | AI Service Opt-Out Policy |
+| Org-wide AI data privacy compliance requirement | AI Service Opt-Out Policies in AWS Organizations |
 
 ---
 
-### Traps
-- GuardDuty does NOT block attacks
+## Tag Policies
+
+**What it is:** Enforce consistent tag key capitalization and allowed values across all AWS resources in the organization.
+
+- **Tag compliance** — identify resources that don't follow tagging standards.
+- Can enforce: specific keys must exist, specific case (`Environment` not `environment`), specific allowed values (`prod`, `dev`, `staging`).
+- **Does NOT auto-tag** — it enforces when tags are applied.
+- Reports non-compliant resources via the **Tag Editor** in Resource Groups console.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Ensure all EC2 instances have `CostCenter` and `Environment` tags with approved values | Tag Policies |
+| Standardize tag capitalization across all accounts in org | Tag Policies (enforces key case) |
 
 ---
 
-## 🚨 6. INCIDENT RESPONSE
+## AWS Control Tower
 
-### Golden Pattern
-EventBridge → Lambda → Remediation
+**What it is:** Orchestrates setup of a secure multi-account AWS environment (Landing Zone) following AWS best practices.
 
----
+### Three Types of Controls (Guardrails)
+| Type | Mechanism | Example |
+|------|-----------|---------|
+| **Preventive** | SCP (blocks API calls) | "Disallow creation of access keys for root user" |
+| **Detective** | Config Rule (detects violation) | "Detect if MFA is not enabled for root" |
+| **Proactive** | CloudFormation Hooks (checks before provisioning) | "Check resource config BEFORE it's created" |
 
-### Compromised EC2
-- Detach IAM role
-- Isolate via SG
-- Snapshot EBS
+### Proactive Controls (New Feature)
+- **CloudFormation Hooks** — intercepts CloudFormation resource creation/update BEFORE the resource is provisioned.
+- If the check fails, the CloudFormation deployment is rejected.
+- Use case: Reject any CloudFormation stack that creates an unencrypted S3 bucket or opens port 22 to 0.0.0.0/0.
+- Proactive controls are applied via Control Tower — no custom Hook development required.
 
----
+### Landing Zone Components
+| Component | Purpose |
+|-----------|---------|
+| **Log Archive account** | Central S3 bucket for CloudTrail + Config logs from all accounts |
+| **Audit account** | Security team access for cross-account read-only review |
+| **Management account** | Root of org — runs Control Tower |
+| **Enrollment** | Onboard existing accounts into Control Tower governance |
 
-### Traps
-- Manual steps = wrong
-- Automation = correct
+### Recommended OU Structure
+```
+Root
+├── Security OU
+│   ├── Log Archive Account
+│   └── Audit Account
+├── Infrastructure OU
+│   ├── Network Account (Transit Gateway, DNS)
+│   └── Shared Services Account
+├── Workloads OU
+│   ├── Production OU
+│   │   └── Production Accounts
+│   └── Development OU
+│       └── Developer Accounts
+└── Sandbox OU
+    └── Experimental Accounts
+```
 
----
-
-## 🏛️ 7. ORGANIZATIONS
-
-### SCP
-- Restricts max permissions
-- Does NOT grant access
-
----
-
-### Logging Pattern
-- Org-wide CloudTrail
-- Central logging account
-
----
-
-### Traps
-- Config ≠ real-time
-- CloudTrail = API logs only
-
----
-
-## 🔥 EXAM PATTERNS (REMEMBER THESE)
-
-### Pattern 1 — Least Privilege
-- IAM role
-- Minimal permissions
-
----
-
-### Pattern 2 — No Internet Exposure
-- Private subnet
-- VPC endpoint
-
----
-
-### Pattern 3 — Encryption
-- KMS
-- SSE-KMS
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent a new CloudFormation resource from being created without encryption | Control Tower proactive controls (CloudFormation Hooks) |
+| Detect MFA not enabled on root account across all accounts | Control Tower detective control (Config rule) |
+| Prevent all accounts from disabling CloudTrail | Control Tower preventive control (SCP) |
+| Newly created AWS accounts auto-enrolled with security controls | Control Tower Account Factory |
 
 ---
 
-### Pattern 4 — Cross-Account
-- AssumeRole (STS)
+## Root User Centralized Management
+
+**What it is:** Organizations feature in new accounts that **removes root user credentials** from member accounts — preventing root access entirely from member accounts.
+
+### Key Facts
+- In new AWS accounts created through Organizations, root user credentials can be **deleted** — only the management account admin can perform root-level tasks on behalf of member accounts.
+- **Break-glass access:** Management account can grant temporary root access to a member account for password reset or account-level operations.
+- Prevents scenarios where a member account root is compromised and used to bypass SCPs.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Prevent member account users from ever using root credentials | Centralized root access management via Organizations |
+| Perform account-level task (close account, change payment) on member account | Management account performs it — member account root not needed |
 
 ---
 
-## 💀 ELIMINATION STRATEGY
+## AWS CloudFormation Guard (cfn-guard)
 
-Always eliminate:
-- Long-term credentials
-- Hardcoded secrets
-- Public access
-- Manual processes
+**What it is:** Open-source, policy-as-code tool for validating CloudFormation templates (and Terraform, Kubernetes manifests) against custom security rules.
+
+### Key Features
+- Write rules in the **Guard DSL** (domain-specific language) — declarative rule format.
+- Validates JSON/YAML templates BEFORE deployment — shift-left security in CI/CD.
+- Integrates with **CodePipeline, CodeBuild** for automated policy checks.
+- Works with **AWS Control Tower proactive controls** — predefined Guard rules for AWS security standards.
+
+### Guard Rule Example
+```
+# Ensure S3 buckets have versioning enabled
+rule S3_BUCKET_VERSIONING_ENABLED {
+  AWS::S3::Bucket {
+    Properties.VersioningConfiguration.Status == "Enabled"
+  }
+}
+```
+
+### cfn-lint
+- Separate linting tool for CloudFormation templates — checks for syntax errors, deprecated properties, and valid resource configurations.
+- cfn-guard = **policy enforcement** (security rules) | cfn-lint = **syntax/correctness checks**.
+
+| Tool | Purpose | Output |
+|------|---------|--------|
+| **cfn-guard** | Policy-as-code rule evaluation | Pass/Fail with rule violation details |
+| **cfn-lint** | Template syntax + correctness | Warnings and errors on template structure |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Reject CloudFormation templates that create public S3 buckets in CI/CD | cfn-guard with S3 public access rule |
+| Validate templates for correct syntax before deploying | cfn-lint |
+| Policy-as-code for infrastructure compliance | cfn-guard |
 
 ---
 
-## 🧠 FINAL RULE
+## AWS Service Catalog
 
-Pick the option that:
-- Scales
-- Is automated
-- Uses least privilege
-- Avoids human intervention
+**What it is:** Centrally manage and distribute approved AWS infrastructure as "products" — ensures teams only deploy compliant, pre-approved configurations.
+
+### Core Concepts
+| Concept | Description |
+|---------|-------------|
+| **Portfolio** | Collection of products — shared with specific IAM users/groups/roles or OUs |
+| **Product** | A CloudFormation template (defines what gets deployed) |
+| **Launch Constraint** | IAM role that deploys the product — end user doesn't need direct CloudFormation permissions |
+| **Notification Constraint** | SNS topic notified on product events |
+| **TagOption Library** | Enforce consistent tags on all launched products |
+| **Self-Service Portal** | End users browse and launch approved products without IT tickets |
+
+### Security Pattern
+- Security team creates products (locked-down CloudFormation stacks with KMS, no public access).
+- Shares the portfolio with developer OUs.
+- Developers launch products via Service Catalog — they get pre-approved infrastructure.
+- Launch constraint IAM role has permissions developers don't — prevents privilege escalation.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Allow developers to provision VPCs without direct CloudFormation permissions | Service Catalog launch constraint with IAM role |
+| Ensure all provisioned infrastructure meets security standards | Service Catalog with pre-approved products |
+| Enforce mandatory tags on all Service Catalog launches | TagOption Library |
+
+---
+
+## AWS Resource Access Manager (RAM)
+
+**What it is:** Share AWS resources across accounts within an Organization without copying them.
+
+### Shareable Resources (Key for Exam)
+| Resource | Use Case |
+|----------|----------|
+| **VPC Subnets** | Share a subnet with other accounts — resources in those accounts can launch into it |
+| **Transit Gateway** | Share central TGW across accounts — no need for peering |
+| **Route 53 Resolver Rules** | Share DNS forwarding rules to all accounts |
+| **Prefix Lists** | Share managed IP prefix lists for use in SG rules |
+| **AWS Private CA** | Share a Private CA to issue certs in other accounts |
+| **License Manager Configurations** | Share software licenses |
+
+### Key Points
+- Resource stays in owner's account — other accounts get a reference.
+- Works **within AWS Organizations** or with specific external account IDs.
+- **No data copying** — the resource itself is shared, not duplicated.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| One VPC subnet used by EC2 in multiple accounts (hub model) | RAM — share subnet to member accounts |
+| One Transit Gateway for all 50 accounts | RAM — share TGW |
+| Share Private CA to issue certs across org | RAM — share Private CA |
+
+---
+
+## AWS Audit Manager
+
+**What it is:** Continuously collect **evidence** for compliance audits — automates manual evidence-gathering tasks.
+
+### How It Works
+- **Frameworks** — pre-built or custom: HIPAA, PCI DSS, CIS, GDPR, NIST, SOC 2.
+- **Controls** — each framework has controls (e.g., "MFA enabled on all IAM users").
+- **Evidence** — auto-collected from Config, CloudTrail, Security Hub, IAM Access Analyzer.
+- **Assessment Reports** — generate audit-ready reports with evidence attachments.
+- Works across accounts with **delegated admin in Organizations**.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Continuously collect evidence for PCI DSS audit | AWS Audit Manager with PCI DSS framework |
+| Automate compliance evidence collection to reduce audit prep time | Audit Manager |
+
+---
+
+## AWS Artifact
+
+**What it is:** On-demand access to AWS compliance reports and agreements — NOT a monitoring tool.
+
+### Two Components
+| Component | Description |
+|-----------|-------------|
+| **Artifact Reports** | Download AWS compliance reports: SOC 1/2/3, PCI DSS AOC, ISO 27001/27017/27018, FedRAMP, GDPR DPA |
+| **Artifact Agreements** | Review and accept legal agreements: BAA (HIPAA), GDPR DPA, NDA |
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Auditor needs AWS SOC 2 Type II report | Download from AWS Artifact Reports |
+| Company needs to sign HIPAA BAA with AWS | AWS Artifact Agreements |
+| Where to get AWS ISO 27001 certification | AWS Artifact |
+
+---
+
+## AWS Well-Architected Tool — Security Pillar
+
+**What it is:** Evaluate workloads against AWS best practices across six pillars — Security pillar is most relevant for SCS-C03.
+
+### Security Pillar — Six Design Principles
+1. **Implement a strong identity foundation** — least privilege, roles, no long-term keys
+2. **Enable traceability** — CloudTrail, CloudWatch, Access Analyzer, alerts on changes
+3. **Apply security at all layers** — VPC, subnets, EC2, OS, application, data
+4. **Automate security best practices** — IaC for security controls, automated responses
+5. **Protect data in transit and at rest** — TLS, KMS, envelope encryption
+6. **Keep people away from data** — minimize direct access; use tools and automation
+7. **Prepare for security events** — incident response plans, simulations (FIS), runbooks
+
+### Well-Architected Review Process
+1. Define workload in WAT.
+2. Answer questions in each pillar.
+3. Receive **High Risk (HRI)** and **Medium Risk (MRI)** findings.
+4. Generate improvement plan.
+5. Milestone snapshots track progress over time.
+
+### Exam Key Points
+| Scenario | Answer |
+|----------|--------|
+| Assess a workload against AWS security best practices | AWS Well-Architected Tool Security Pillar review |
+| Track security posture improvement over time | Well-Architected Tool milestones |
+
+---
+
+# ⚡ SCS-C03 EDGE CASES — REAL EXAM EXPERIENCE (Community-Reported)
+
+> Sources: r/AWSCertifications exam reports, A Cloud Guru forums, TechStudySlack, and personal exam debriefs shared publicly. These are the **questions people got wrong** — not the ones they expected.
+
+---
+
+## KMS Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| AWS managed key cross-account | "I'll just share the key" | ❌ AWS managed keys (`aws/s3`, `aws/ebs`) **cannot** be used cross-account. Must use a customer-managed CMK |
+| Key rotation changes key ID | Panic about re-encryption | ❌ Automatic rotation retains the same key ID and ARN. New backing material is added silently. Existing ciphertext remains decryptable |
+| Both key policy AND IAM policy required | IAM policy alone should work | ❌ Both must allow the action. IAM policy alone = denied unless key policy delegates control to root account |
+| `GenerateDataKey` vs `GenerateDataKeyWithoutPlaintext` | Same thing? | `GenerateDataKey` returns both encrypted + plaintext key (encrypt now). `GenerateDataKeyWithoutPlaintext` returns only encrypted key (decrypt later). Exam uses "pre-generate keys for offline encryption" → `WithoutPlaintext` |
+| S3 Bucket Key changes encryption context | Didn't know it changes anything | When S3 Bucket Key is enabled, the encryption context changes from object-level to bucket-level. Applications validating encryption context must account for this |
+| Imported key material rotation | Same as CMK rotation? | ❌ Keys with **imported key material cannot use automatic rotation**. Must manually rotate by creating a new CMK |
+| Key deletion waiting period | 7 days minimum | Minimum is 7 days, default is 30 days. Cannot be set to 0. Cannot be cancelled after the period expires |
+| Multi-region keys vs CRR | "It replicates the encrypted data" | Multi-region keys replicate **key material only** — not the encrypted data. You still need to copy the data separately |
+
+---
+
+## IAM & SCP Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Permission Boundary grants permissions | "I added the boundary so now they can do it" | ❌ Permission boundaries **only restrict** — they never grant permissions. Identity policy + boundary must both allow |
+| SCPs apply to management account | "SCPs govern everything in the org" | ❌ SCPs attached to the root OU or management account **do NOT apply to the management account**. Only member accounts |
+| SCPs apply to service-linked roles | "SCPs block everything" | ❌ SCPs **do not restrict service-linked roles (SLRs)**. GuardDuty, Config, etc. use SLRs that bypass SCPs |
+| `iam:PassRole` is often the missing permission | "The user has all the right permissions" | When a user creates a Lambda, EC2, or ECS task, they need `iam:PassRole` to assign a role to that resource — this is the most commonly missed permission |
+| `aws:PrincipalOrgID` in resource policies | "Need cross-account roles for org-wide access" | Resource policies (S3, KMS, SQS) with `aws:PrincipalOrgID` condition allow any principal in the entire org without explicit cross-account role setup |
+| `ExternalId` condition on AssumeRole | "That's for MFA" | `ExternalId` is the **confused deputy protection** for third-party access. If a vendor assumes a role in your account, `ExternalId` prevents other vendors from doing the same |
+| `aws:MultiFactorAuthAge` vs `aws:MultiFactorAuthPresent` | Used interchangeably | `Present` = boolean (was MFA used?). `Age` = seconds since MFA authentication. Use `Age` to enforce re-authentication after N seconds |
+| Deny in SCP overrides Allow in identity policy | "The identity policy allows it" | Evaluation order: Explicit Deny anywhere = final Deny. SCP Deny cannot be overridden by IAM Allow |
+
+---
+
+## GuardDuty Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| GuardDuty reads CloudTrail independently | "Need to configure CloudTrail for GuardDuty" | GuardDuty pulls CloudTrail management events directly — you do **not** need CloudTrail enabled separately for GuardDuty to work |
+| S3 / EKS / Lambda protection off by default | "GuardDuty covers everything once enabled" | GuardDuty core covers EC2/IAM threats. **S3 Protection, EKS Audit Log Monitoring, EKS Runtime Monitoring, Lambda Protection, RDS Protection are separate features that must be explicitly enabled** |
+| Suppression rules vs Trusted IP lists | Same thing? | Trusted IP list = never generate findings for this IP. Suppression rule = generate the finding but auto-archive it. Exam uses "stop alerting on known scanner" → Trusted IP list |
+| GuardDuty in single region | "Multi-region is needed" | GuardDuty is **regional**. Each region must be enabled independently. Organizations can enable it via delegated admin for all regions at once |
+| GuardDuty finding retention | "Findings persist indefinitely" | GuardDuty retains findings for **90 days**. Archive to S3 via EventBridge → Firehose for long-term storage |
+
+---
+
+## CloudTrail Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Data events are off by default | "CloudTrail records everything" | ❌ Management events are on by default. **S3 object-level (GetObject, PutObject) and Lambda invoke events are data events — disabled by default. Must explicitly enable** |
+| CloudTrail does NOT record all events | "It captures everything in AWS" | CloudTrail records **API calls only**. Does not capture: OS-level events, in-instance activity, stdout/stderr, application logs |
+| CloudTrail log file integrity | "Logs are automatically tamper-proof" | Must explicitly enable **log file validation** to get digest files. Without it, you cannot detect log tampering |
+| CloudTrail Lake vs S3 + Athena | Both seem equivalent | CloudTrail Lake = lowest operational overhead for SQL querying (no S3 bucket, no Glue catalog needed). S3 + Athena = more flexible, requires more setup |
+| CloudTrail across regions | "One trail covers all regions" | A trail can be configured as multi-region via `--is-multi-region-trail`. Without this flag, it only covers the region it was created in |
+| CloudTrail for S3 server access logging | Same as S3 data events? | CloudTrail S3 data events = per-object API call logging (who called GetObject). S3 server access logs = HTTP-level request logging. Different granularity, different use cases |
+
+---
+
+## S3 Security Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| S3 Block Public Access overrides bucket policy | "The bucket policy allows public, so it works" | S3 Block Public Access (at account or bucket level) **overrides** all bucket policies and ACLs. It is the highest-priority control |
+| Pre-signed URL expiry with STS (role) credentials | "URL is valid until its stated expiry time" | ❌ For role-based pre-signed URLs, the URL expires when the **STS session expires** — even if the URL's stated expiry is later. Permissions are evaluated at **access time** (revoking the session or the access key invalidates the URL). To force-revoke before expiry, attach an explicit Deny with `aws:TokenIssueTime` condition on the role |
+| Object Lock Compliance vs Governance mode | Same thing? | **Governance:** users with `s3:BypassGovernanceRetention` can delete. **Compliance:** **nobody** — including root — can delete or shorten the retention period. More restrictive |
+| CRR does not replicate delete markers by default | "Replication copies everything including deletes" | CRR replicates new objects. Delete markers are **not replicated by default** — must configure `DeleteMarkerReplication`. Deletions on source do not auto-delete replicas |
+| SSE-C key not stored by AWS | "AWS manages the key" | With SSE-C, the customer provides the encryption key with every request. **AWS does not store the key** — if you lose it, the data is unrecoverable |
+| S3 Access Points restrict access per VPC | "Bucket policy does the same thing" | S3 Access Points allow per-application access policies and can be restricted to a specific VPC endpoint only — easier to manage than one complex bucket policy |
+
+---
+
+## VPC & Network Security Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| VPC Flow Logs miss some traffic | "Flow logs = full packet capture" | VPC Flow Logs **do NOT capture**: traffic to/from 169.254.169.254 (metadata service), DHCP traffic, DNS queries to the VPC resolver, Windows license activation traffic |
+| PrivateLink is one-directional | "Like VPC peering — both sides can talk" | PrivateLink (Interface endpoint) is **consumer → provider only**. The provider cannot initiate connections back. No route table update needed |
+| Interface endpoints vs Gateway endpoints | Same thing, just different syntax | **Gateway endpoints** (S3, DynamoDB): free, route table entry. **Interface endpoints** (most other services): cost $0.01/hr/AZ, use DNS |
+| Network Firewall vs WAF vs Security Groups vs NACLs | All do "firewall stuff" | SG = per-instance stateful. NACL = per-subnet stateless. WAF = Layer 7 HTTP filtering. Network Firewall = deep packet inspection, IDS/IPS, FQDN filtering at VPC perimeter |
+| Shield Advanced does NOT auto-block attacks | "Shield protects everything automatically" | Shield Standard auto-blocks common DDoS. **Shield Advanced provides detection, cost protection, 24/7 DRT access, and enhanced reports — but does not automatically block without WAF or Network Firewall** |
+
+---
+
+## AWS Config Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Config records state, does NOT prevent changes | "Config will block non-compliant resources" | ❌ Config is **detective**, not preventive. It records configuration history and evaluates rules but **cannot block API calls**. Use SCPs or IAM to prevent |
+| Config rules evaluate periodically OR on change | "Config is real-time" | Change-triggered rules run when a resource changes. Periodic rules run on a schedule (1h, 3h, 6h, 12h, 24h). Not all rules are truly real-time |
+| Config remediation requires SSM Automation | "Config remediates by itself" | Automated remediation in Config uses **SSM Automation documents**. Config triggers the document — the actual fix is done by SSM |
+| Config Aggregator shows findings but can't remediate | "Aggregator = control plane for all accounts" | Config Aggregator is **read-only** — it aggregates data from source accounts for visibility only. Remediation must be done in each source account |
+
+---
+
+## Inspector v2 Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Inspector v2 is completely different from v1 | "Same service, newer version" | Inspector v2 is a **rewrite**: always-on, no assessment targets/templates, automated, integrates with Security Hub. v1 is legacy. Exam tests v2 |
+| Inspector needs SSM Agent for EC2 | "Inspector scans EC2 directly" | EC2 vulnerability scanning in Inspector v2 requires the **SSM Agent** to be installed and the instance to be managed by Systems Manager |
+| Inspector does NOT scan S3 | "Inspector scans all storage for issues" | ❌ Inspector scans EC2, ECR container images, and Lambda functions. **S3 sensitive data scanning = Macie** |
+| Inspector scans Lambda code | Didn't know | Inspector v2 scans **Lambda function code** for software vulnerabilities (not just packages) — this is a commonly tested newer feature |
+
+---
+
+## Security Hub Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Security Hub does NOT detect threats | "Security Hub = GuardDuty alternative" | Security Hub **aggregates and scores findings from other services** (GuardDuty, Inspector, Macie, Config, Firewall Manager). It does not independently detect threats |
+| Findings use ASFF format | "Just JSON" | All findings in Security Hub use **Amazon Security Finding Format (ASFF)**. Cross-service integrations depend on this — exam may ask about format compatibility |
+| Security Hub requires Config | "Security Hub works standalone" | Security Hub's **compliance standards** (CIS, PCI, FSBP) require AWS Config to be enabled. Without Config, the compliance checks cannot run |
+| Delegated administrator receives all findings | "Each account manages its own" | With a delegated admin, **all member account findings are visible in the admin account**. Individual accounts can still see their own findings but not others |
+
+---
+
+## Secrets Manager & Parameter Store Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| First rotation runs immediately | "Rotation will start on the schedule" | When you enable rotation for the first time, **rotation runs immediately** — if your app is mid-connection, it may break. Use the rotation window to mitigate |
+| Rotation Lambda needs network access | "Lambda auto-connects to the database" | The rotation Lambda must have **network access to the secret's target** (e.g., the RDS instance). If the DB is in a private subnet, Lambda must be in the same VPC |
+| Parameter Store cross-account | "Same as Secrets Manager" | ❌ Parameter Store does **not support cross-account access**. Secrets Manager does via resource-based policy |
+| Secrets Manager resource policy for cross-account | "Use AssumeRole for cross-account secrets" | Secrets Manager supports a **resource policy** that allows specific external accounts to call `GetSecretValue` directly — no role assumption needed |
+
+---
+
+## Cognito Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| User Pool vs Identity Pool confusion | Used interchangeably | **User Pool = authentication** (creates user identities, issues JWT tokens). **Identity Pool = authorization** (exchanges tokens for temporary AWS credentials via STS) |
+| Identity Pool unauthenticated role | "Unauthenticated = no access" | Identity Pools can assign an **unauthenticated IAM role** — giving limited AWS access to guest users without sign-in. Exam tests whether you know this is configurable |
+| Cognito hosted UI certificate must be in us-east-1 | Didn't know | Cognito custom domain (hosted UI) requires the ACM certificate to be in **us-east-1** regardless of the Cognito pool region |
+| Cognito User Pool as IdP to User Pool | "Can't federate to another User Pool" | A Cognito User Pool can federate with external SAML/OIDC IdPs — and a second Cognito User Pool can act as an OIDC IdP for federation |
+
+---
+
+## Firewall Manager Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Firewall Manager is the "future accounts" answer | "Use SCP to auto-apply WAF" | When the question asks "automatically apply WAF rules to all current and **future** accounts in the org" → **Firewall Manager**, not SCP. Firewall Manager auto-remediates new accounts |
+| Requires Organizations with all features | "Works with consolidated billing only" | Firewall Manager requires **AWS Organizations with all features enabled** (not just consolidated billing) and a designated Firewall Manager admin account |
+| Manages multiple security services | "Just for WAF" | Firewall Manager manages: WAF, Shield Advanced, Security Groups, Network Firewall, Route 53 Resolver DNS Firewall, and VPC endpoint policies |
+
+---
+
+## ACM Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| ACM public certificates cannot be exported | "I'll export the cert and install it on-prem" | ❌ ACM public certificates are **not exportable** — the private key never leaves ACM. For on-prem/non-AWS use, use ACM Private CA (certificates from it can be exported) |
+| CloudFront requires ACM cert in us-east-1 | "Cert can be in any region" | ACM certificates for **CloudFront must be in us-east-1** regardless of distribution origin region. ALB certificates must be in the same region as the ALB |
+| ACM auto-renews 60 days before expiry | "Manual renewal needed" | ACM auto-renews public certificates. But if **DNS validation** is used, the CNAME record must still exist. If it was deleted, renewal fails silently |
+
+---
+
+## Amazon Detective Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| Detective ≠ GuardDuty | "Detective detects threats" | Detective is for **investigation and root cause analysis** — not detection. GuardDuty detects → Security Hub aggregates → **Detective investigates** |
+| Detective requires GuardDuty | "Standalone service" | Detective **requires GuardDuty to be enabled** in the account/region as its data source |
+| Detective uses graph model | "It's just dashboards" | Detective builds a **behavior graph** from CloudTrail, VPC Flow Logs, and GuardDuty findings — used to visualize lateral movement, affected resources, and timelines |
+
+---
+
+## Commonly Misidentified Service Pairs (Real Exam Traps)
+
+| Scenario | Wrong answer (common) | Correct answer |
+|----------|----------------------|----------------|
+| Detect sensitive data in S3 | Inspector | **Macie** |
+| Scan EC2 for OS vulnerabilities | GuardDuty | **Inspector v2** |
+| Investigate root cause of a GuardDuty finding | Security Hub | **Detective** |
+| Aggregate compliance findings across 100 accounts | Config per account | **Security Hub** (delegated admin) |
+| "Comprehensive security score" across standards | GuardDuty | **Security Hub** (security score) |
+| Auto-apply WAF to future accounts in org | SCP | **Firewall Manager** |
+| Detect unusual API call volume | CloudWatch alarm | **CloudTrail Insights** |
+| SQL query against CloudTrail logs (lowest overhead) | Athena + S3 | **CloudTrail Lake** |
+| Org-wide S3 public access prevention without SCP | IAM policy | **S3 Block Public Access at account level** (or enforced via Config rule + SCP) |
+| Quarantine compromised EC2 without deleting it | Terminate + redeploy | **Isolate: remove SG, revoke IAM role, snapshot for forensics** |
+| Restrict what external principals can do to org resources | SCP | **RCP (Resource Control Policy)** |
+| Enforce IMDSv2 on all EC2 regardless of launch parameters | SCP deny IMDSv1 | **Declarative Policy** (enforces configuration state, not just API) |
+| Fine-grained authorization decisions externalized from app code | IAM | **Amazon Verified Permissions (Cedar)** |
+| On-premises servers accessing AWS without long-term keys | IAM access keys | **IAM Roles Anywhere** (X.509 certs + temporary credentials) |
+| Validate CloudFormation templates against security rules in CI/CD | Manual review | **cfn-guard** (policy-as-code) |
+| Check CloudFormation template for syntax correct before deploy | cfn-guard | **cfn-lint** (syntax + correctness) |
+| Encrypt Direct Connect link at Layer 2 | Site-to-Site VPN | **MACsec on dedicated Direct Connect** |
+| Cross-account resource sharing without copying (Transit Gateway) | VPC peering | **AWS RAM** |
+| Collect audit evidence continuously for compliance frameworks | Manual evidence gathering | **AWS Audit Manager** |
+| Download AWS SOC 2 / PCI DSS reports for auditors | AWS Security Hub | **AWS Artifact** |
+
+---
+
+## Governance Edge Cases
+
+| Edge Case | What Trips People | Correct Understanding |
+|-----------|------------------|-----------------------|
+| RCP vs SCP confusion | "SCP prevents external access to resources" | ❌ SCP restricts **principals**. RCP restricts **resources** — only RCPs can block external principals from accessing org resources |
+| RCP applies to management account | "New policy, probably same as SCP" | ❌ Like SCPs, RCPs do **not apply to the management account** |
+| Declarative Policy vs SCP for IMDSv2 | Same effect? | Different mechanism: SCP Deny blocks the API call if wrong value; Declarative Policy **enforces** the attribute state at provisioning time — stronger guarantee |
+| Control Tower proactive controls block what | "Same as detective controls but proactive" | Proactive controls (CloudFormation Hooks) reject CloudFormation resource creation BEFORE it happens — not just detect after |
+| Service Catalog launch constraint | "Need to grant CloudFormation permissions to devs" | ❌ Launch constraint IAM role handles deployment — devs only need Service Catalog permissions, not CloudFormation or IAM permissions |
+| RAM shared subnet ownership | "My account owns resources in the shared subnet" | You launch instances in the shared subnet — but the **subnet itself belongs to the owner account**. You pay for your instances, owner pays for the subnet |
+
+---
+
+## Numbers & Limits That Appear in Exam Scenarios
+
+| Item | Value | Why It Matters |
+|------|-------|---------------|
+| KMS direct encrypt max | 4 KB | Reason to use `GenerateDataKey` (envelope encryption) |
+| KMS key deletion minimum waiting period | 7 days | Cannot skip or reduce below 7 days; imported keys can delete immediately |
+| GuardDuty finding retention | 90 days | Archive to S3 for longer retention |
+| Parameter Store Standard max size | 4 KB | Larger values need Advanced tier (8 KB) |
+| Secrets Manager max secret size | 64 KB | Rarely a constraint but tested |
+| CloudTrail log delivery delay | ~15 minutes (typical) | Not real-time — use EventBridge for near-real-time |
+| S3 Object Lock Compliance mode | No one can delete | Even root cannot override Compliance mode retention |
+| ACM auto-renewal lead time | 60 days before expiry | Fails silently if DNS validation CNAME was removed |
+| SCP management account exemption | Always | Management account root is never restricted by SCPs |
+| Session Manager session logging | Full keystroke log | Captured to CloudTrail + optional S3/CloudWatch |
+| IAM Roles Anywhere max session duration | 12 hours | Same as standard role assumption max |
+| CloudFront ACM cert region | us-east-1 only | Must be in us-east-1 regardless of origin region |
+
+---
+
+# ✅ FINAL EXAM CHECK
+
+Run this checklist before submitting every answer:
+
+| Question | Check |
+|----------|-------|
+| Is this **visibility** or **processing**? | Visibility → CloudWatch/CloudTrail. Processing → Kinesis. |
+| Did I follow keyword mapping? | Match the verb in the question to the service table above. |
+| Am I choosing the most AWS-native managed solution? | Prefer built-in rotation, delegated admin, managed rules over custom Lambda. |
+| Am I overengineering? | If one service solves it natively, don't add a second. |
+| Does the SCP have an escape hatch? | Blanket denies with no exception = likely wrong answer. |
+| Is KMS cross-account using a CMK (not AWS managed key)? | AWS managed keys cannot be shared cross-account. |
+| Is it detection or prevention being asked for? | GuardDuty/Inspector = detect. SCP/Config rules = enforce. |
+| Is it restricting principals or resources? | Principals → SCP. Resources org-wide → RCP. |
+| Does the question involve on-prem workloads needing AWS access? | Consider IAM Roles Anywhere (X.509) not access keys. |
+| Is there a "policy-as-code" in CI/CD requirement? | cfn-guard (security rules) not cfn-lint (syntax check). |
+
+> **Golden rule:** If two answers look correct, pick the one whose service name matches the keyword used in the question stem — not your preferred architecture.
 
 ---
